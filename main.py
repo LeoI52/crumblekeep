@@ -453,6 +453,23 @@ def make_basic_room(width:int, height:int, wall_tile:tuple, floor_tile:tuple)-> 
         tiles.append(row)
     return Room(width, height, tiles)
 
+def mark_room(room:Room, ox:int, oy:int, occupied_tiles:set)-> set:
+    ox += 1
+    oy += 1
+    for y in range(room.height - 2):
+        for x in range(room.width):
+            occupied_tiles.add((ox + x, oy + y))
+
+    return occupied_tiles
+
+def check_room_collision(room:Room, ox:int, oy:int, occupied_tiles:set):
+    for y in range(room.height):
+        for x in range(room.width):
+            pos = (ox + x, oy + y)
+            if pos in occupied_tiles:
+                return True
+    return False
+
 def draw_room(room:Room, ox:int, oy:int, direction:str=""):
     for y in range(room.height):
         for x in range(room.width):
@@ -493,21 +510,42 @@ def place_next_room(curr_room:Room, curr_pos:tuple, next_room:Room, direction:st
 def generate_dungeon(start_room:Room, end_room:Room, fill_rooms:list, num_main_rooms:int, ox:int=100, oy:int=100):
     x, y = ox, oy
     curr_room = start_room
+    curr_dir = ""
     draw_room(start_room, x, y)
     next_dir = ""
+    occupied_tiles = set()
+    occupied_tiles = mark_room(curr_room, x, y, occupied_tiles)
 
     xs = [x, x + curr_room.width]
     ys = [y, y + curr_room.height]
 
-    for i in range(num_main_rooms - 1):
-        next_dir = random.choice([d for d in ["N","S","E","W"] if d != CARDINAL_OPPOSITE.get(next_dir)])
-        next_room = random.choice(fill_rooms) if i < num_main_rooms - 2 else end_room
+    placed_rooms = 1
+    count_1 = 0
+    while placed_rooms < num_main_rooms and count_1 < 50:
+        count_1 += 1
 
-        x, y = place_next_room(curr_room, (x, y), next_room, next_dir)
+        next_dir = random.choice([d for d in ["N","S","E","W"] if d != CARDINAL_OPPOSITE.get(curr_dir)])
+        next_room = random.choice(fill_rooms) if placed_rooms < num_main_rooms - 1 else end_room
+        next_x, next_y = place_next_room(curr_room, (x, y), next_room, next_dir)
+
+        count_2 = 0
+        while check_room_collision(next_room, next_x, next_y, occupied_tiles) and count_1 < 10:
+            next_dir = random.choice([d for d in ["N","S","E","W"] if d != CARDINAL_OPPOSITE.get(curr_dir)])
+            next_room = random.choice(fill_rooms) if placed_rooms < num_main_rooms - 1 else end_room
+            next_x, next_y = place_next_room(curr_room, (x, y), next_room, next_dir)
+            count_2 += 1
+
+        if check_room_collision(next_room, next_x, next_y, occupied_tiles):
+            continue
+
+        x, y = next_x, next_y
         xs += [x, x + curr_room.width]
         ys += [y, y + curr_room.height]
         draw_room(next_room, x, y, CARDINAL_OPPOSITE.get(next_dir))
+        occupied_tiles = mark_room(curr_room, x, y, occupied_tiles)
         curr_room = next_room
+        curr_dir = next_dir
+        placed_rooms += 1
 
     return (min(xs), min(ys), max(xs), max(ys))
 
@@ -553,7 +591,7 @@ class Game:
         self.end_room = make_basic_room(5, 5, (1, 0), (2, 2))
         self.rooms = [make_basic_room(7, 7, (1, 0), (0, 2)), make_basic_room(15, 7, (1, 0), (0, 2)), make_basic_room(17, 13, (1, 0), (0, 2))]
         self.min_x, self.min_y, self.max_x, self.max_y = generate_dungeon(self.start_room, self.end_room, self.rooms, 10)
-        place_walls(self.min_x, self.min_y, self.max_x, self.max_y)
+        place_walls(self.min_x, self.min_y, self.max_x + 10, self.max_y + 10)
 
         self.pyxel_manager.run()
 
