@@ -12,7 +12,7 @@ import os
 
 # -------------------- UTILS -------------------- #
 
-PALETTE = [0x000000, 0x2B335F, 0x7E2072, 0x19959C, 0x8B4852, 0x395C98, 0xA9C1FF, 0xEEEEEE, 0xD4186C, 0xD38441, 0xE9C35B, 0x70C6A9, 0x7696DE, 0xA3A3A3, 0xFF9798, 0xEDC7B0]
+PALETTE = [0xFFFFFF, 0xFFD19D, 0xAEB5BD, 0x4D80C9, 0x054494, 0x511E43, 0x100820, 0x823E2C, 0xE93841, 0xF1892D, 0xFFE947, 0xFFA9A9, 0xEB6C82, 0x7D3EBF, 0x1E8A4C, 0x5AE150]
 
 characters_matrices = {
     " ":[[0,0,0,0]],
@@ -430,6 +430,179 @@ class Scene:
         self.palette = palette
         self.screen_mode = screen_mode
 
+class Text:
+
+    def __init__(self, text:str, x:int, y:int, text_colors:int|list, font_size:int=0, anchor:int=ANCHOR_TOP_LEFT, relative:bool=False, color_mode:int=NORMAL_COLOR_MODE, color_speed:int=5, wavy:bool=False, wave_speed:int=10, amplitude:int=3, shadow:bool=False, shadow_color:int=0, shadow_offset:int=1, glitch_intensity:int=0):
+        self.text = text
+        self.x, self.y = x, y
+        self.__font_size = font_size
+        self.__anchor = anchor
+        self.__relative = relative
+        self.__wavy = wavy
+        self.__wave_speed = wave_speed
+        self.__amplitude = amplitude
+        self.__shadow = shadow
+        self.__shadow_color = shadow_color
+        self.__shadow_offset = shadow_offset
+        self.__glitch_intensity = glitch_intensity
+
+        self.__text_colors = [text_colors] if isinstance(text_colors, int) else text_colors
+        self.__original_text_colors = [x for x in self.__text_colors]
+        self.__color_mode = color_mode
+        self.__color_speed = color_speed
+        self.__last_change_color_time = pyxel.frame_count
+
+        _, text_height = text_size(text, font_size)
+        _, self.y = get_anchored_position(0, y, 0, text_height, anchor)
+
+    def __draw_line(self, text:str, y:int, camera_x:int=0, camera_y:int=0):
+        text_width, _ = text_size(text, self.__font_size)
+        x, _ = get_anchored_position(self.x, 0, text_width, 0, self.__anchor)
+
+        if self.__relative:
+            x += camera_x
+            y += camera_y
+
+        if self.__shadow:
+            Text(text, x + self.__shadow_offset, y + self.__shadow_offset, self.__shadow_color, self.__font_size, wavy=self.__wavy, wave_speed=self.__wave_speed, amplitude=self.__amplitude).draw()
+
+        if self.__font_size > 0:
+            for char_index, char in enumerate(text):
+                    x += random.uniform(-self.__glitch_intensity, self.__glitch_intensity)
+                    char_y = y + math.cos(pyxel.frame_count / self.__wave_speed + char_index * 0.3) * self.__amplitude if self.__wavy else y
+                    char_y += random.uniform(-self.__glitch_intensity, self.__glitch_intensity)
+
+                    if char in characters_matrices:
+                        char_matrix = characters_matrices[char]
+                        char_width = len(char_matrix[0]) * self.__font_size
+                        
+                        for row_index, row in enumerate(char_matrix):
+                            for col_index, pixel in enumerate(row):
+                                if pixel:
+                                    pyxel.rect(x + col_index * self.__font_size, char_y + row_index * self.__font_size + (1 * self.__font_size if char in "gjpqy" else 0), self.__font_size, self.__font_size, self.__text_colors[char_index % len(self.__text_colors)])
+                        
+                        x += char_width + 1
+        else:
+            for char_index, char in enumerate(text):
+                x += random.uniform(-self.__glitch_intensity, self.__glitch_intensity)
+                char_y = y + math.cos(pyxel.frame_count / self.__wave_speed + char_index * 0.3) * self.__amplitude if self.__wavy else y
+                char_y += random.uniform(-self.__glitch_intensity, self.__glitch_intensity)
+                pyxel.text(x, char_y, char, self.__text_colors[char_index % len(self.__text_colors)])
+                x += 4
+
+    def update(self):
+        if self.__color_mode != NORMAL_COLOR_MODE and pyxel.frame_count - self.__last_change_color_time >= self.__color_speed:
+            if self.__color_mode == ROTATING_COLOR_MODE:
+                self.__last_change_color_time = pyxel.frame_count
+                self.__text_colors = [self.__text_colors[-1]] + self.__text_colors[:-1]
+            elif self.__color_mode == RANDOM_COLOR_MODE:
+                self.__last_change_color_time = pyxel.frame_count
+                self.__text_colors = [random.choice(self.__original_text_colors) for _ in range(len(self.text))]
+
+    def draw(self, camera_x:int=0, camera_y:int=0):
+        if "\n" in self.text:
+            lines = self.text.split("\n")
+            for i, line in enumerate(lines):
+                if self.__font_size > 0:
+                    self.__draw_line(line, self.y + i * (9 * self.__font_size), camera_x, camera_y)
+                else:
+                    self.__draw_line(line, self.y + i * 6, camera_x, camera_y)
+        else:
+            self.__draw_line(self.text, self.y, camera_x, camera_y)
+
+class Button:
+
+    def __init__(self, text:str, x:int, y:int, background_color:int, text_colors:list|int, hover_background_color:int, hover_text_colors:list|int, font_size:int=1, border:bool=False, border_color:int=0, color_mode:int=NORMAL_COLOR_MODE, color_speed:int=10, relative:bool=True, anchor:int=ANCHOR_TOP_LEFT, command=None):
+        self.__x = x
+        self.__y = y
+        self.__width, self.__height = text_size(text, font_size)
+        self.__width += 4 if border else 2
+        self.__height += 4 if border else 2
+        self.__background_color = background_color
+        self.__hover_background_color = hover_background_color
+        self.__border = border
+        self.__border_color = border_color
+        self.__relative = relative
+        self.__command = command
+
+        self.__x, self.__y = get_anchored_position(self.__x, self.__y, self.__width, self.__height, anchor)
+
+        self.__text = Text(text, self.__x + 2 if border else self.__x + 1, self.__y + 2 if border else self.__y + 1, text_colors, font_size, color_mode=color_mode, color_speed=color_speed, relative=relative)
+        self.__hover_text = Text(text, self.__x + 2 if border else self.__x + 1, self.__y + 2 if border else self.__y + 1, hover_text_colors, font_size, color_mode=color_mode, color_speed=color_speed, relative=relative)
+
+    def is_hovered(self, camera_x:int=0, camera_y:int=0)-> bool:
+        if self.__x <= pyxel.mouse_x < self.__x + self.__width and self.__y <= pyxel.mouse_y < self.__y + self.__height and self.__relative:
+            return True
+        if self.__x <= camera_x + pyxel.mouse_x < self.__x + self.__width and self.__y <= camera_y + pyxel.mouse_y < self.__y + self.__height and not self.__relative:
+            return True
+        
+    def update(self, camera_x:int=0, camera_y:int=0):
+        self.__text.update()
+        self.__hover_text.update()
+        if pyxel.btnp(pyxel.MOUSE_BUTTON_LEFT) and self.is_hovered(camera_x, camera_y) and self.__command:
+            self.__command()
+
+    def draw(self, camera_x:int=0, camera_y:int=0):
+        x = camera_x + self.__x if self.__relative else self.__x
+        y = camera_y + self.__y if self.__relative else self.__y
+        if self.is_hovered(camera_x, camera_y):
+            pyxel.rect(x, y, self.__width, self.__height, self.__hover_background_color)
+            self.__hover_text.draw(camera_x, camera_y)
+        else:
+            pyxel.rect(x, y, self.__width, self.__height, self.__background_color)
+            self.__text.draw(camera_x, camera_y)
+        if self.__border:
+            pyxel.rectb(x, y, self.__width, self.__height, self.__border_color)
+
+def get_anchored_position(x:int, y:int, width:int, height:int, anchor:int)-> tuple:
+    if anchor in [ANCHOR_TOP_RIGHT, ANCHOR_BOTTOM_RIGHT, ANCHOR_RIGHT]:
+        x -= width
+    if anchor in [ANCHOR_BOTTOM_LEFT, ANCHOR_BOTTOM_RIGHT, ANCHOR_BOTTOM]:
+        y -= height
+    if anchor in [ANCHOR_TOP, ANCHOR_BOTTOM, ANCHOR_CENTER]:
+        x -= width // 2
+    if anchor in [ANCHOR_LEFT, ANCHOR_RIGHT, ANCHOR_CENTER]:
+        y -= height // 2
+
+    return x, y
+
+def text_size(text:str, font_size:int=1)-> tuple:
+    lines = text.split("\n")
+    if font_size == 0:
+        return (max(len(line) * 4 for line in lines), 6 * len(lines))
+    text_width = max(sum(len(characters_matrices[char][0]) * font_size + 1 for char in line) - 1 for line in lines)
+    text_height = (9 * font_size + 1) * len(lines)
+
+    return (text_width, text_height)
+
+def rounded_rect(x:int, y:int, width:int, height:int, corner_radius:int, color:int):
+    corner_radius = min(corner_radius, min(width, height) // 2)
+    corner_radius = int(corner_radius)
+
+    pyxel.rect(x + corner_radius, y, width - 2 * corner_radius, height, color)
+    pyxel.rect(x, y + corner_radius, width, height - 2 * corner_radius, color)
+    
+    for cx, cy, sx, sy in [(x + corner_radius, y + corner_radius, -1, -1), (x + width - corner_radius - 1, y + corner_radius, 1, -1), (x + corner_radius, y + height - corner_radius - 1, -1, 1), (x + width - corner_radius - 1, y + height - corner_radius - 1, 1, 1)]:
+        for i in range(corner_radius + 1):
+            for j in range(corner_radius + 1):
+                if i*i + j*j <= corner_radius*corner_radius:
+                    pyxel.pset(cx + sx * i, cy + sy * j, color)
+
+def rounded_rectb(x:int, y:int, width:int, height:int, corner_radius:int, color:int):
+    corner_radius = min(corner_radius, min(width, height) // 2)
+
+    pyxel.line(x + corner_radius, y, x + width - corner_radius - 1, y, color)
+    pyxel.line(x + corner_radius, y + height - 1, x + width - corner_radius - 1, y + height - 1, color)
+    pyxel.line(x, y + corner_radius, x, y + height - corner_radius - 1, color)
+    pyxel.line(x + width - 1, y + corner_radius, x + width - 1, y + height - corner_radius - 1, color)
+    
+    for cx, cy, sx, sy in [(x + corner_radius, y + corner_radius, -1, -1), (x + width - corner_radius - 1, y + corner_radius, 1, -1), (x + corner_radius, y + height - corner_radius - 1, -1, 1), (x + width - corner_radius - 1, y + height - corner_radius - 1, 1, 1)]:
+        for i in range(corner_radius + 1):
+            for j in range(corner_radius + 1):
+                dist = math.sqrt(i*i + j*j)
+                if corner_radius - 0.5 <= dist <= corner_radius + 0.5:
+                    pyxel.pset(cx + sx * i, cy + sy * j, color)
+
 # -------------------- CLASSES -------------------- #
 
 class Room:
@@ -438,6 +611,11 @@ class Room:
         self.width = width
         self.height = height
         self.tiles = tiles
+
+class Player:
+
+    def __init__(self):
+        pass
 
 # -------------------- FUNCTIONS -------------------- #
 
@@ -457,7 +635,7 @@ def mark_room(room:Room, ox:int, oy:int, occupied_tiles:set)-> set:
     ox += 1
     oy += 1
     for y in range(room.height - 2):
-        for x in range(room.width):
+        for x in range(room.width - 2):
             occupied_tiles.add((ox + x, oy + y))
 
     return occupied_tiles
@@ -625,7 +803,15 @@ class Game:
         game_scene = Scene(3, "CrumbleKeep - Game", self.update_game, self.draw_game, "assets.pyxres")
         scenes = [main_menu_scene, credits_scene, lobby_scene, game_scene]
 
-        self.pyxel_manager = PyxelManager(228 * 3, 128 * 3, scenes, 3, fullscreen=True, mouse=True, camera_x=800 - 228 * 3 // 2, camera_y=800 - 128 * 3 // 2)
+        self.pyxel_manager = PyxelManager(228, 128, scenes, 3, fullscreen=True, mouse=True, camera_x=800 - 228 // 2, camera_y=800 - 128 // 2)
+
+        self.title = Text("CrumbleKeep", 50, 10, 6, 1, ANCHOR_TOP)
+        self.play_button = Button("Play", 50, 50, 0, 6, 6, 0, 1, True, 6, anchor=ANCHOR_TOP, command=self.play_action)
+        self.credits_button = Button("Credits", 50, 70, 0, 6, 6, 0, 1, True, 6, anchor=ANCHOR_TOP, command=self.credit_action)
+
+        self.credits_title = Text("Credits", 55, 7, 6, 1, ANCHOR_TOP)
+        self.credits_text = Text("This game was\nmade for the\nBrackeys game\njam 2025 by\nLéo Imbert\nand\nHugochavez\nwith Pyxel.", 55, 70, 6, 1, anchor=ANCHOR_CENTER)
+        self.back_button = Button("Back", 55, 121, 0, 6, 6, 0, 1, True, 6, anchor=ANCHOR_BOTTOM, command=self.back_action)
 
         self.start_room = make_basic_room(5, 5, (1, 0), (1, 2))
         self.end_room = make_basic_room(5, 5, (1, 0), (2, 2))
@@ -636,17 +822,40 @@ class Game:
 
         self.pyxel_manager.run()
 
+    def play_action(self):
+        self.pyxel_manager.change_scene_dither(2, 0.05, 0)
+
+    def credit_action(self):
+        self.pyxel_manager.change_scene_dither(1, 0.05, 0)
+
+    def back_action(self):
+        self.pyxel_manager.change_scene_dither(0, 0.05, 0)
+
     def update_main_menu(self):
-        pass
+        self.title.update()
+        self.play_button.update()
+        self.credits_button.update()
 
     def draw_main_menu(self):
-        pyxel.cls(0)
+        pyxel.cls(6)
+
+        rounded_rect(5, 5, 90, 118, 10, 0)
+        self.title.draw()
+        self.play_button.draw()
+        self.credits_button.draw()
 
     def update_credits(self):
-        pass
+        self.credits_title.update()
+        self.credits_text.update()
+        self.back_button.update()
 
     def draw_credits(self):
-        pyxel.cls(0)
+        pyxel.cls(6)
+
+        rounded_rect(5, 5, 100, 118, 10, 0)
+        self.credits_title.draw()
+        self.credits_text.draw()
+        self.back_button.draw()
 
     def update_lobby(self):
         pass
@@ -656,7 +865,7 @@ class Game:
 
     def update_game(self):
         if pyxel.btnp(pyxel.KEY_R):
-            self.pyxel_manager.change_scene(3, 800 - 228 * 3 // 2, 800 - 128 * 3 // 2)
+            self.pyxel_manager.change_scene(3, 800 - 228 // 2, 800 - 128 // 2)
             self.min_x, self.min_y, self.max_x, self.max_y = generate_dungeon(self.start_room, self.end_room, self.rooms, [self.special_room], 10, 3, 4)
             place_walls(self.min_x, self.min_y, self.max_x + 10, self.max_y + 10)
 
