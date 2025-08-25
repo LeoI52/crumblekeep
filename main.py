@@ -496,13 +496,45 @@ def generate_dungeon(start_room:Room, end_room:Room, fill_rooms:list, num_main_r
     draw_room(start_room, x, y)
     next_dir = ""
 
+    xs = [x, x + curr_room.width]
+    ys = [y, y + curr_room.height]
+
     for i in range(num_main_rooms - 1):
         next_dir = random.choice([d for d in ["N","S","E","W"] if d != CARDINAL_OPPOSITE.get(next_dir)])
         next_room = random.choice(fill_rooms) if i < num_main_rooms - 2 else end_room
 
         x, y = place_next_room(curr_room, (x, y), next_room, next_dir)
+        xs += [x, x + curr_room.width]
+        ys += [y, y + curr_room.height]
         draw_room(next_room, x, y, CARDINAL_OPPOSITE.get(next_dir))
         curr_room = next_room
+
+    return (min(xs), min(ys), max(xs), max(ys))
+
+def get_neighbors(x:int, y:int):
+    n = 0
+    if pyxel.tilemaps[0].pget(x, y - 1) == (1, 0):
+        n += 1
+    if pyxel.tilemaps[0].pget(x + 1, y) == (1, 0):
+        n += 2
+    if pyxel.tilemaps[0].pget(x, y + 1) == (1, 0):
+        n += 4
+    if pyxel.tilemaps[0].pget(x - 1, y) == (1, 0):
+        n += 8
+
+    return n
+
+def place_walls(min_x:int, min_y:int, max_x:int, max_y:int):
+    walls = []
+    for y in range(min_y, max_y):
+        for x in range(min_x, max_x):
+            neighbors = get_neighbors(x, y)
+            if pyxel.tilemaps[0].pget(x, y) == (1, 0):
+                walls.append((x, y, neighbors))
+
+    for x, y, neighbors in walls:
+        pyxel.tilemaps[0].pset(x, y, (neighbors, 1))
+
 
 # -------------------- GAME -------------------- #
 
@@ -515,12 +547,13 @@ class Game:
         game_scene = Scene(3, "CrumbleKeep - Game", self.update_game, self.draw_game, "assets.pyxres")
         scenes = [main_menu_scene, credits_scene, lobby_scene, game_scene]
 
-        self.pyxel_manager = PyxelManager(228 * 3, 128 * 3, scenes, 3, fullscreen=True, mouse=True, camera_x=800 - 228 * 3 // 2, camera_y=800 - 128 * 3 // 2)
+        self.pyxel_manager = PyxelManager(228 * 5, 128 * 5, scenes, 3, fullscreen=True, mouse=True, camera_x=800 - 228 * 5 // 2, camera_y=800 - 128 * 5 // 2)
 
-        self.start_room = make_basic_room(5, 5, (0, 1), (1, 2))
-        self.end_room = make_basic_room(5, 5, (0, 1), (2, 2))
-        self.rooms = [make_basic_room(7, 7, (0, 1), (0, 2)), make_basic_room(15, 7, (0, 1), (0, 2)), make_basic_room(17, 13, (0, 1), (0, 2))]
-        generate_dungeon(self.start_room, self.end_room, self.rooms, 10)
+        self.start_room = make_basic_room(5, 5, (1, 0), (1, 2))
+        self.end_room = make_basic_room(5, 5, (1, 0), (2, 2))
+        self.rooms = [make_basic_room(7, 7, (1, 0), (0, 2)), make_basic_room(15, 7, (1, 0), (0, 2)), make_basic_room(17, 13, (1, 0), (0, 2))]
+        self.min_x, self.min_y, self.max_x, self.max_y = generate_dungeon(self.start_room, self.end_room, self.rooms, 10)
+        place_walls(self.min_x, self.min_y, self.max_x, self.max_y)
 
         self.pyxel_manager.run()
 
@@ -544,8 +577,9 @@ class Game:
 
     def update_game(self):
         if pyxel.btnp(pyxel.KEY_R):
-            self.pyxel_manager.change_scene(3, 800 - 228 * 3 // 2, 800 - 128 * 3 // 2)
-            generate_dungeon(self.start_room, self.end_room, self.rooms, 10)
+            self.pyxel_manager.change_scene(3, 800 - 228 * 5 // 2, 800 - 128 * 5 // 2)
+            self.min_x, self.min_y, self.max_x, self.max_y = generate_dungeon(self.start_room, self.end_room, self.rooms, 10)
+            place_walls(self.min_x, self.min_y, self.max_x + 10, self.max_y + 10)
 
         if pyxel.btn(pyxel.KEY_LEFT):
             self.pyxel_manager.set_camera(self.pyxel_manager.camera_x - 5, self.pyxel_manager.camera_y)
@@ -559,7 +593,7 @@ class Game:
     def draw_game(self):
         pyxel.cls(1)
 
-        pyxel.bltm(0, 0, 0, 0, 0, 2000, 2000, 0)
+        pyxel.bltm(0, 0, 0, 0, 0, (self.max_x + 10) * 8, (self.max_y + 10) * 8, 0)
 
 if __name__ == "__main__":
     Game()
