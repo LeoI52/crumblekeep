@@ -752,9 +752,13 @@ class Player:
 
         self.velocity_x = 0
         self.velocity_y = 0
-        self.speed = 1
+        self.speed = 0.8
         self.max_velocity = 2
         self.friction = 0.85
+
+        self.dash_timer = 0
+        self.dash_time = 10
+        self.dash_power = 10
 
     def collision_rect_tiles(self, x:int, y:int, w:int, h:int, tiles:list)-> bool:
         start_tile_x = x // 8
@@ -792,8 +796,25 @@ class Player:
                     break
 
     def update(self):
+        if self.dash_timer > 0:
+            self.dash_timer -= 1
+            self.update_velocity_x()
+            self.update_velocity_y()
+            return
+
         self.velocity_x *= self.friction
         self.velocity_y *= self.friction
+
+        if pyxel.btnp(pyxel.MOUSE_BUTTON_RIGHT) and self.dash_timer == 0:
+            self.dash_timer = self.dash_time
+            
+            dx = pyxel.mouse_x - 114
+            dy = pyxel.mouse_y - 64
+            length = (dx ** 2 + dy ** 2) ** 0.5
+
+            self.velocity_x = dx / length * self.dash_power
+            self.velocity_y = dy / length * self.dash_power
+            return
 
         dx, dy = 0, 0
         if pyxel.btn(pyxel.KEY_LEFT) or pyxel.btn(pyxel.KEY_Q) or pyxel.btn(pyxel.KEY_A):
