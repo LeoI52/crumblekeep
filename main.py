@@ -12,7 +12,7 @@ import os
 
 # -------------------- UTILS -------------------- #
 
-PALETTE = [0xFFFFFF, 0xFFD19D, 0xAEB5BD, 0x4D80C9, 0x054494, 0x511E43, 0x100820, 0x823E2C, 0xE93841, 0xF1892D, 0xFFE947, 0xFFA9A9, 0xEB6C82, 0x7D3EBF, 0x1E8A4C, 0x5AE150]
+PALETTE = [0x100820, 0xFFD19D, 0xAEB5BD, 0x4D80C9, 0x054494, 0x511E43, 0xFFFFFF, 0x823E2C, 0xE93841, 0xF1892D, 0xFFE947, 0xFFA9A9, 0xEB6C82, 0x7D3EBF, 0x1E8A4C, 0x5AE150]
 
 characters_matrices = {
     " ":[[0,0,0,0]],
@@ -114,6 +114,8 @@ characters_matrices = {
 }
 
 CARDINAL_OPPOSITE = {"N":"S", "S":"N", "W":"E", "E":"W"}
+
+WALL_TILES = {(0, 2), (1, 2), (0, 3), (1, 3)}
 
 NORMAL_COLOR_MODE = 0
 ROTATING_COLOR_MODE = 1
@@ -605,6 +607,38 @@ def rounded_rectb(x:int, y:int, width:int, height:int, corner_radius:int, color:
 
 # -------------------- CLASSES -------------------- #
 
+class DungeonMap:
+
+    def __init__(self, width:int, height:int, default_tile:tuple=(0, 0)):
+        self.width = width
+        self.height = height
+        self.tiles = [[default_tile for _ in range(width)] for _ in range(height)]
+
+    def set_tile(self, x:int, y:int, tile:tuple):
+        if 0 <= x < self.width and 0 <= y < self.height:
+            self.tiles[y][x] = tile
+
+    def get_tile(self, x:int, y:int)-> tuple:
+        if 0 <= x < self.width and 0 <= y < self.height:
+            return self.tiles[y][x]
+        return None
+    
+    def draw(self, camera_x:int, camera_y:int):
+        cam_x = int(camera_x)
+        cam_y = int(camera_y)
+
+        start_x = max(0, cam_x // 8)
+        start_y = max(0, cam_y // 8)
+        end_x = min(self.width, (cam_x + pyxel.width) // 8 + 2)
+        end_y = min(self.height, (cam_y + pyxel.height) // 8 + 2)
+
+        for y in range(start_y, end_y):
+            for x in range(start_x, end_x):
+                tile = self.tiles[y][x]
+                if tile:
+                    u, v = tile
+                    pyxel.blt(x*8, y*8, 0, u*8, v*8, 8, 8, 0)
+
 class Room:
 
     def __init__(self, width:int, height:int, tiles:list):
@@ -613,9 +647,51 @@ class Room:
         self.tiles = tiles
 
 class Player:
+    
+    def __init__(self, x:int, y:int, dungeon:DungeonMap):
+        self.x = x
+        self.y = y
+        self.width = 24
+        self.height = 24
+        self.speed = 2
+        self.dungeon = dungeon
 
-    def __init__(self):
-        pass
+    def collide_with(self, new_x:int, new_y:int, tiles:set) -> bool:
+        for px in range(new_x, new_x + self.width + 1, 8):
+            for py in range(new_y, new_y + self.height + 1, 8):
+                tile_x = px // 8
+                tile_y = py // 8
+                tile = self.dungeon.get_tile(tile_x, tile_y)
+                if tile in tiles:
+                    return True
+
+        edge_points = [(new_x + self.width - 1, new_y), (new_x, new_y + self.height - 1), (new_x + self.width - 1, new_y + self.height - 1)]
+        for px, py in edge_points:
+            tile_x = px // 8
+            tile_y = py // 8
+            tile = self.dungeon.get_tile(tile_x, tile_y)
+            if tile in tiles:
+                return True
+
+        return False
+
+    def update(self):
+        dx, dy = 0, 0
+        if pyxel.btn(pyxel.KEY_LEFT): dx = -self.speed
+        if pyxel.btn(pyxel.KEY_RIGHT): dx = self.speed
+        if pyxel.btn(pyxel.KEY_UP): dy = -self.speed
+        if pyxel.btn(pyxel.KEY_DOWN): dy = self.speed
+
+        new_x = self.x + dx
+        new_y = self.y + dy
+
+        if not self.collide_with(new_x, self.y, WALL_TILES):
+            self.x = new_x
+        if not self.collide_with(self.x, new_y, WALL_TILES):
+            self.y = new_y
+
+    def draw(self):
+        pyxel.rect(self.x, self.y, self.width, self.height, 4)
 
 # -------------------- FUNCTIONS -------------------- #
 
@@ -632,64 +708,81 @@ def make_basic_room(width:int, height:int, wall_tile:tuple, floor_tile:tuple)-> 
     return Room(width, height, tiles)
 
 def mark_room(room:Room, ox:int, oy:int, occupied_tiles:set)-> set:
-    ox += 1
-    oy += 1
-    for y in range(room.height - 2):
-        for x in range(room.width - 2):
+    ox += 2
+    oy += 2
+    for y in range(room.height * 2 - 4):
+        for x in range(room.width * 2 - 4):
             occupied_tiles.add((ox + x, oy + y))
 
     return occupied_tiles
 
 def check_room_collision(room:Room, ox:int, oy:int, occupied_tiles:set):
-    for y in range(room.height):
-        for x in range(room.width):
+    for y in range(room.height * 2):
+        for x in range(room.width * 2):
             pos = (ox + x, oy + y)
             if pos in occupied_tiles:
                 return True
     return False
 
-def draw_room(room:Room, ox:int, oy:int, direction:str=""):
-    for y in range(room.height):
-        for x in range(room.width):
-            u, v = room.tiles[y][x]
-            pyxel.tilemaps[0].pset(ox + x, oy + y, (u, v))
+def draw_room(room:Room, ox:int, oy:int, dungeon_map:DungeonMap, direction:str="", door_tile:tuple=(0, 4)):
+    for y in range(0, room.height * 2, 2):
+        for x in range(0, room.width * 2, 2):
+            u, v = room.tiles[y // 2][x // 2]
+            dungeon_map.set_tile(ox + x, oy + y, (u, v))
+            dungeon_map.set_tile(ox + x + 1, oy + y, (u + 1, v))
+            dungeon_map.set_tile(ox + x + 1, oy + y + 1, (u + 1, v + 1))
+            dungeon_map.set_tile(ox + x, oy + y + 1, (u, v + 1))
+
+    u, v = door_tile
 
     if direction == "N":
-        cx = ox + room.width // 2
-        for dx in (-1, 0, 1):
-            pyxel.tilemaps[0].pset(cx + dx, oy, (0, 2))
+        cx = ox + room.width
+        for dx in (-3, -1, 1):
+            dungeon_map.set_tile(cx + dx, oy, (u, v))
+            dungeon_map.set_tile(cx + dx + 1, oy, (u + 1, v))
+            dungeon_map.set_tile(cx + dx + 1, oy + 1, (u + 1, v + 1))
+            dungeon_map.set_tile(cx + dx, oy + 1, (u, v + 1))
     elif direction == "S":
-        cx = ox + room.width // 2
-        for dx in (-1, 0, 1):
-            pyxel.tilemaps[0].pset(cx + dx, oy + room.height - 1, (0, 2))
+        cx = ox + room.width
+        for dx in (-3, -1, 1):
+            dungeon_map.set_tile(cx + dx, oy + room.height * 2 - 2, (u, v))
+            dungeon_map.set_tile(cx + dx + 1, oy + room.height * 2 - 2, (u + 1, v))
+            dungeon_map.set_tile(cx + dx + 1, oy + room.height * 2 - 1, (u + 1, v + 1))
+            dungeon_map.set_tile(cx + dx, oy + room.height * 2 - 1, (u, v + 1))
     elif direction == "W":
-        cy = oy + room.height // 2
-        for dy in (-1, 0, 1):
-            pyxel.tilemaps[0].pset(ox, cy + dy, (0, 2))
+        cy = oy + room.height
+        for dy in (-3, -1, 1):
+            dungeon_map.set_tile(ox, cy + dy, (u, v))
+            dungeon_map.set_tile(ox + 1, cy + dy, (u + 1, v))
+            dungeon_map.set_tile(ox + 1, cy + dy + 1, (u + 1, v + 1))
+            dungeon_map.set_tile(ox, cy + dy + 1, (u, v + 1))
     elif direction == "E":
-        cy = oy + room.height // 2
-        for dy in (-1, 0, 1):
-            pyxel.tilemaps[0].pset(ox + room.width - 1, cy + dy, (0, 2))
+        cy = oy + room.height
+        for dy in (-3, -1, 1):
+            dungeon_map.set_tile(ox + room.width * 2 - 2, cy + dy, (u, v))
+            dungeon_map.set_tile(ox + room.width * 2 - 1, cy + dy, (u + 1, v))
+            dungeon_map.set_tile(ox + room.width * 2 - 1, cy + dy + 1, (u + 1, v + 1))
+            dungeon_map.set_tile(ox + room.width * 2 - 2, cy + dy + 1, (u, v + 1))
 
-def place_next_room(curr_room:Room, curr_pos:tuple, next_room:Room, direction:str):
+def place_next_room(curr_room:Room, curr_pos:tuple, next_room:Room, direction:str)-> tuple:
     x, y = curr_pos
-    x_diff = (curr_room.width - next_room.width) // 2
-    y_diff = (curr_room.height - next_room.height) // 2
+    x_diff = (curr_room.width * 2 - next_room.width * 2) // 2
+    y_diff = (curr_room.height * 2 - next_room.height * 2) // 2
 
     if direction == "E":
-        return (x + curr_room.width - 1, y + y_diff)
+        return (x + curr_room.width * 2 - 2, y + y_diff)
     if direction == "W":
-        return (x - next_room.width + 1, y + y_diff)
+        return (x - next_room.width * 2 + 2, y + y_diff)
     if direction == "S":
-        return (x + x_diff, y + curr_room.height - 1)
+        return (x + x_diff, y + curr_room.height * 2 - 2)
     if direction == "N":
-        return (x + x_diff, y - next_room.height + 1)
+        return (x + x_diff, y - next_room.height * 2 + 2)
 
-def generate_dungeon(start_room:Room, end_room:Room, fill_rooms:list, special_rooms:list, num_main_rooms:int, num_branches:int, branch_length:int, ox:int=100, oy:int=100):
+def generate_dungeon(dungeon_map:DungeonMap, start_room:Room, end_room:Room, fill_rooms:list, special_rooms:list, num_main_rooms:int, num_branches:int, branch_length:int, ox:int=500, oy:int=500):
     x, y = ox, oy
     curr_room = start_room
     curr_dir = ""
-    draw_room(start_room, x, y)
+    draw_room(start_room, x, y, dungeon_map)
     next_dir = ""
     occupied_tiles = set()
     occupied_tiles = mark_room(curr_room, x, y, occupied_tiles)
@@ -720,7 +813,7 @@ def generate_dungeon(start_room:Room, end_room:Room, fill_rooms:list, special_ro
         x, y = next_x, next_y
         xs += [x, x + curr_room.width]
         ys += [y, y + curr_room.height]
-        draw_room(next_room, x, y, CARDINAL_OPPOSITE.get(next_dir))
+        draw_room(next_room, x, y, dungeon_map, CARDINAL_OPPOSITE.get(next_dir))
         curr_room = next_room
         curr_dir = next_dir
         occupied_tiles = mark_room(curr_room, x, y, occupied_tiles)
@@ -752,7 +845,7 @@ def generate_dungeon(start_room:Room, end_room:Room, fill_rooms:list, special_ro
                 continue
 
             bx, by = next_bx, next_by
-            draw_room(next_room, bx, by, CARDINAL_OPPOSITE.get(curr_branch_dir))
+            draw_room(next_room, bx, by, dungeon_map, CARDINAL_OPPOSITE.get(curr_branch_dir))
             occupied_tiles = mark_room(next_room, bx, by, occupied_tiles)
 
             xs += [bx, bx + next_room.width]
@@ -768,30 +861,6 @@ def generate_dungeon(start_room:Room, end_room:Room, fill_rooms:list, special_ro
 
     return (min(xs), min(ys), max(xs), max(ys))
 
-def get_neighbors(x:int, y:int):
-    n = 0
-    if pyxel.tilemaps[0].pget(x, y - 1) == (1, 0):
-        n += 1
-    if pyxel.tilemaps[0].pget(x + 1, y) == (1, 0):
-        n += 2
-    if pyxel.tilemaps[0].pget(x, y + 1) == (1, 0):
-        n += 4
-    if pyxel.tilemaps[0].pget(x - 1, y) == (1, 0):
-        n += 8
-
-    return n
-
-def place_walls(min_x:int, min_y:int, max_x:int, max_y:int):
-    walls = []
-    for y in range(min_y, max_y):
-        for x in range(min_x, max_x):
-            neighbors = get_neighbors(x, y)
-            if pyxel.tilemaps[0].pget(x, y) == (1, 0):
-                walls.append((x, y, neighbors))
-
-    for x, y, neighbors in walls:
-        pyxel.tilemaps[0].pset(x, y, (neighbors, 1))
-
 # -------------------- GAME -------------------- #
 
 class Game:
@@ -803,22 +872,24 @@ class Game:
         game_scene = Scene(3, "CrumbleKeep - Game", self.update_game, self.draw_game, "assets.pyxres")
         scenes = [main_menu_scene, credits_scene, lobby_scene, game_scene]
 
-        self.pyxel_manager = PyxelManager(228, 128, scenes, 3, fullscreen=True, mouse=True, camera_x=800 - 228 // 2, camera_y=800 - 128 // 2)
+        self.pyxel_manager = PyxelManager(228, 128, scenes, 3, fullscreen=True, mouse=True, camera_x=500 * 8, camera_y=500 * 8)
 
-        self.title = Text("CrumbleKeep", 50, 10, 6, 1, ANCHOR_TOP)
-        self.play_button = Button("Play", 50, 50, 0, 6, 6, 0, 1, True, 6, anchor=ANCHOR_TOP, command=self.play_action)
-        self.credits_button = Button("Credits", 50, 70, 0, 6, 6, 0, 1, True, 6, anchor=ANCHOR_TOP, command=self.credit_action)
+        self.title = Text("CrumbleKeep", 50, 10, 0, 1, ANCHOR_TOP)
+        self.play_button = Button("Play", 50, 50, 6, 0, 0, 6, 1, True, 0, anchor=ANCHOR_TOP, command=self.play_action)
+        self.credits_button = Button("Credits", 50, 70, 6, 0, 0, 6, 1, True, 0, anchor=ANCHOR_TOP, command=self.credit_action)
 
         self.credits_title = Text("Credits", 55, 7, 6, 1, ANCHOR_TOP)
         self.credits_text = Text("This game was\nmade for the\nBrackeys game\njam 2025 by\nLéo Imbert\nand\nHugochavez\nwith Pyxel.", 55, 70, 6, 1, anchor=ANCHOR_CENTER)
         self.back_button = Button("Back", 55, 121, 0, 6, 6, 0, 1, True, 6, anchor=ANCHOR_BOTTOM, command=self.back_action)
 
-        self.start_room = make_basic_room(5, 5, (1, 0), (1, 2))
-        self.end_room = make_basic_room(5, 5, (1, 0), (2, 2))
-        self.special_room = make_basic_room(5, 5, (1, 0), (3, 2))
-        self.rooms = [make_basic_room(7, 7, (1, 0), (0, 2)), make_basic_room(15, 7, (1, 0), (0, 2)), make_basic_room(17, 13, (1, 0), (0, 2))]
-        self.min_x, self.min_y, self.max_x, self.max_y = generate_dungeon(self.start_room, self.end_room, self.rooms, [self.special_room], 10, 3, 4)
-        place_walls(self.min_x, self.min_y, self.max_x + 10, self.max_y + 10)
+        self.start_room = make_basic_room(5, 5, (0, 2), (2, 4))
+        self.end_room = make_basic_room(5, 5, (0, 2), (4, 4))
+        self.special_room = make_basic_room(5, 5, (0, 2), (6, 4))
+        self.rooms = [make_basic_room(7, 7, (0, 2), (0, 4)), make_basic_room(15, 7, (0, 2), (0, 4)), make_basic_room(17, 13, (0, 2), (0, 4))]
+        
+        self.dungeon_map = DungeonMap(1024, 1024)
+        self.min_x, self.min_y, self.max_x, self.max_y = generate_dungeon(self.dungeon_map, self.start_room, self.end_room, self.rooms, [self.special_room], 10, 4, 2)
+        self.player = Player(502 * 8, 502 * 8, self.dungeon_map)
 
         self.pyxel_manager.run()
 
@@ -837,9 +908,9 @@ class Game:
         self.credits_button.update()
 
     def draw_main_menu(self):
-        pyxel.cls(6)
+        pyxel.cls(0)
 
-        rounded_rect(5, 5, 90, 118, 10, 0)
+        rounded_rect(5, 5, 90, 118, 10, 6)
         self.title.draw()
         self.play_button.draw()
         self.credits_button.draw()
@@ -865,23 +936,18 @@ class Game:
 
     def update_game(self):
         if pyxel.btnp(pyxel.KEY_R):
-            self.pyxel_manager.change_scene(3, 800 - 228 // 2, 800 - 128 // 2)
-            self.min_x, self.min_y, self.max_x, self.max_y = generate_dungeon(self.start_room, self.end_room, self.rooms, [self.special_room], 10, 3, 4)
-            place_walls(self.min_x, self.min_y, self.max_x + 10, self.max_y + 10)
+            self.pyxel_manager.change_scene(3, 500 * 8, 500 * 8)
+            self.dungeon_map = DungeonMap(1024, 1024)
+            generate_dungeon(self.dungeon_map, self.start_room, self.end_room, self.rooms, [self.special_room], 10, 4, 2)
 
-        if pyxel.btn(pyxel.KEY_LEFT):
-            self.pyxel_manager.set_camera(self.pyxel_manager.camera_x - 5, self.pyxel_manager.camera_y)
-        if pyxel.btn(pyxel.KEY_RIGHT):
-            self.pyxel_manager.set_camera(self.pyxel_manager.camera_x + 5, self.pyxel_manager.camera_y)
-        if pyxel.btn(pyxel.KEY_UP):
-            self.pyxel_manager.set_camera(self.pyxel_manager.camera_x, self.pyxel_manager.camera_y - 5)
-        if pyxel.btn(pyxel.KEY_DOWN):
-            self.pyxel_manager.set_camera(self.pyxel_manager.camera_x, self.pyxel_manager.camera_y + 5)
+        self.player.update()
+        self.pyxel_manager.move_camera(self.player.x + self.player.width // 2 - pyxel.width // 2, self.player.y + self.player.height // 2 - pyxel.height // 2)
 
     def draw_game(self):
-        pyxel.cls(1)
+        pyxel.cls(0)
 
-        pyxel.bltm(0, 0, 0, 0, 0, (self.max_x + 10) * 8, (self.max_y + 10) * 8, 0)
+        self.dungeon_map.draw(self.pyxel_manager.camera_x, self.pyxel_manager.camera_y)
+        self.player.draw()
 
 if __name__ == "__main__":
     Game()
