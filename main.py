@@ -1,7 +1,7 @@
 """
 @author : Léo Imbert
 @created : 25/08/2025
-@updated : 25/08/2025
+@updated : 26/08/2025
 """
 
 import random
@@ -11,8 +11,6 @@ import sys
 import os
 
 # -------------------- UTILS -------------------- #
-
-PALETTE = [0x100820, 0xFFD19D, 0xAEB5BD, 0x4D80C9, 0x054494, 0x511E43, 0xFFFFFF, 0x823E2C, 0xE93841, 0xF1892D, 0xFFE947, 0xFFA9A9, 0xEB6C82, 0x7D3EBF, 0x1E8A4C, 0x5AE150]
 
 characters_matrices = {
     " ":[[0,0,0,0]],
@@ -112,10 +110,6 @@ characters_matrices = {
     "€":[[0,0,0,0,0,0],[0,0,1,1,1,0],[0,1,0,0,0,1],[0,1,1,1,0,0],[1,0,0,0,0,0],[0,1,1,1,0,0],[0,1,0,0,0,1],[0,0,1,1,1,0]],
     "$":[[0,0,1,0,0],[0,1,1,1,0],[1,0,1,0,1],[1,0,1,0,0],[0,1,1,1,0],[0,0,1,0,1],[1,0,1,0,1],[0,1,1,1,0],[0,0,1,0,0]]
 }
-
-CARDINAL_OPPOSITE = {"N":"S", "S":"N", "W":"E", "E":"W"}
-
-WALL_TILES = {(0, 2), (1, 2), (0, 3), (1, 3)}
 
 NORMAL_COLOR_MODE = 0
 ROTATING_COLOR_MODE = 1
@@ -423,7 +417,7 @@ class PyxelManager:
 
 class Scene:
 
-    def __init__(self, id:int, title:str, update, draw, pyxres_path:str=None, palette:list=PALETTE, screen_mode:int=0):
+    def __init__(self, id:int, title:str, update, draw, pyxres_path:str, palette:list, screen_mode:int=0):
         self.id = id
         self.title = title
         self.update = update
@@ -556,6 +550,74 @@ class Button:
         if self.__border:
             pyxel.rectb(x, y, self.__width, self.__height, self.__border_color)
 
+class CircleLight:
+
+    def __init__(self, x:int, y:int, radius:int, lights_substitution_colors:dict, state_change_interval:int=30, turn_on_chance:float=1, turn_off_chance:float=0):
+        self.x= x
+        self.y = y
+        self.__radius = radius
+        self.__lights_substitution_colors = lights_substitution_colors
+        self.__points = self.__generate_points_list()
+        self.on = True
+        self.turn_on_chance = turn_on_chance
+        self.turn_off_chance = turn_off_chance
+        self.__start_frame = pyxel.frame_count
+        self.state_change_interval = state_change_interval
+
+    @property
+    def radius(self)-> int:
+        return self.__radius
+    
+    @radius.setter
+    def radius(self, value):
+        self.__radius = value
+        self.__points = self.__generate_points_list()
+
+    def __generate_points_list(self)-> list:
+        return [(x, y) for x in range(-self.__radius, self.__radius + 1) for y in range(-self.__radius, self.__radius + 1) if x ** 2 + y ** 2 <= self.__radius ** 2]
+
+    def draw(self, camera_x:int, camera_y:int):
+        if pyxel.frame_count - self.__start_frame >= self.state_change_interval:
+            self.__start_frame = pyxel.frame_count
+
+            if self.on and random.random() <= self.turn_off_chance:
+                self.on = False
+            elif not self.on and random.random() <= self.turn_on_chance:
+                self.on = True
+
+        if not self.on:
+            return
+
+        cam_x = camera_x
+        cam_y = camera_y
+
+        for x, y in self.__points:
+            screen_x = self.x + x - cam_x
+            screen_y = self.y + y - cam_y
+
+            if 0 <= screen_x < pyxel.width and 0 <= screen_y < pyxel.height:
+                current_color = pyxel.pget(screen_x, screen_y)
+                if current_color in self.__lights_substitution_colors:
+                    pyxel.pset(self.x + x, self.y + y, self.__lights_substitution_colors[current_color])
+
+class LightManager:
+
+    def __init__(self):
+        self.__lights = []
+
+    def reset(self):
+        self.__lights = []
+
+    def add_light(self, light:CircleLight):
+        self.__lights.append(light)
+
+    def remove_light(self, light:CircleLight):
+        self.__lights.remove(light)
+
+    def draw(self, camera_x:int, camera_y:int):
+        for light in self.__lights:
+            light.draw(camera_x, camera_y)
+
 def get_anchored_position(x:int, y:int, width:int, height:int, anchor:int)-> tuple:
     if anchor in [ANCHOR_TOP_RIGHT, ANCHOR_BOTTOM_RIGHT, ANCHOR_RIGHT]:
         x -= width
@@ -605,6 +667,39 @@ def rounded_rectb(x:int, y:int, width:int, height:int, corner_radius:int, color:
                 if corner_radius - 0.5 <= dist <= corner_radius + 0.5:
                     pyxel.pset(cx + sx * i, cy + sy * j, color)
 
+def hex_to_rgb(hex_val:int)-> tuple:
+    r = (hex_val >> 16) & 0xFF
+    g = (hex_val >> 8) & 0xFF
+    b = hex_val & 0xFF
+    return r, g, b
+
+def rgb_to_hex(r:int, g:int, b:int)-> int:
+    return int(f"0x{r:02X}{g:02X}{b:02X}", 16)
+
+def brightness_adjusted_palette(original_palette:list, kwargs:dict={})-> list:
+    palette = []
+    factor = kwargs.get("factor", 1)
+    for color in original_palette:
+        r, g, b = hex_to_rgb(color)
+        new_r = min(255, max(0, int(r * factor)))
+        new_g = min(255, max(0, int(g * factor)))
+        new_b = min(255, max(0, int(b * factor)))
+        palette.append(rgb_to_hex(new_r, new_g, new_b))
+    return palette
+
+def wave_motion(value:float, wave_speed:float, amplitude:float, time:int)-> float:
+    return value + (math.cos(time / wave_speed)) * amplitude
+
+# -------------------- CONSTANTS -------------------- #
+
+PALETTE = [0x100820, 0xFFD19D, 0xAEB5BD, 0x4D80C9, 0x054494, 0x511E43, 0xFFFFFF, 0x823E2C, 0xE93841, 0xF1892D, 0xFFE947, 0xFFA9A9, 0xEB6C82, 0x7D3EBF, 0x1E8A4C, 0x5AE150]
+PALETTE = brightness_adjusted_palette(PALETTE, {"factor":0.6}) + PALETTE
+LIGHTSUB_DICT = {x:x + 16 for x in range(16)}
+
+CARDINAL_OPPOSITE = {"N":"S", "S":"N", "W":"E", "E":"W"}
+
+COLLISION_TILES = {(0, 2), (1, 2), (0, 3), (1, 3)}
+
 # -------------------- CLASSES -------------------- #
 
 class DungeonMap:
@@ -647,52 +742,86 @@ class Room:
         self.tiles = tiles
 
 class Player:
-    
+
     def __init__(self, x:int, y:int, dungeon:DungeonMap):
         self.x = x
         self.y = y
         self.width = 24
         self.height = 24
-        self.speed = 2
         self.dungeon = dungeon
 
-    def collide_with(self, new_x:int, new_y:int, tiles:set) -> bool:
-        for px in range(new_x, new_x + self.width + 1, 8):
-            for py in range(new_y, new_y + self.height + 1, 8):
-                tile_x = px // 8
-                tile_y = py // 8
-                tile = self.dungeon.get_tile(tile_x, tile_y)
-                if tile in tiles:
+        self.velocity_x = 0
+        self.velocity_y = 0
+        self.speed = 1
+        self.max_velocity = 2
+        self.friction = 0.85
+
+    def collision_rect_tiles(self, x:int, y:int, w:int, h:int, tiles:list)-> bool:
+        start_tile_x = x // 8
+        start_tile_y = y // 8
+        end_tile_x = (x + w - 1) // 8
+        end_tile_y = (y + h - 1) // 8
+
+        for tile_y in range(int(start_tile_y), int(end_tile_y) + 1):
+            for tile_x in range(start_tile_x, end_tile_x + 1):
+                tile_id = self.dungeon.get_tile(tile_x, tile_y)
+
+                if tile_id in tiles:
                     return True
-
-        edge_points = [(new_x + self.width - 1, new_y), (new_x, new_y + self.height - 1), (new_x + self.width - 1, new_y + self.height - 1)]
-        for px, py in edge_points:
-            tile_x = px // 8
-            tile_y = py // 8
-            tile = self.dungeon.get_tile(tile_x, tile_y)
-            if tile in tiles:
-                return True
-
+        
         return False
 
+    def update_velocity_x(self):
+        if self.velocity_x != 0:
+            step_x = 1 if self.velocity_x > 0 else -1
+            for _ in range(int(abs(self.velocity_x))):
+                if not self.collision_rect_tiles(self.x + step_x, self.y, self.width, self.height, COLLISION_TILES):
+                    self.x += step_x
+                else:
+                    self.velocity_x = 0
+                    break
+
+    def update_velocity_y(self):
+        if self.velocity_y != 0:
+            step_y = 1 if self.velocity_y > 0 else -1
+            for _ in range(int(abs(self.velocity_y))):
+                if not self.collision_rect_tiles(self.x, self.y + step_y, self.width, self.height, COLLISION_TILES):
+                    self.y += step_y
+                else:
+                    self.velocity_y = 0
+                    break
+
     def update(self):
+        self.velocity_x *= self.friction
+        self.velocity_y *= self.friction
+
         dx, dy = 0, 0
-        if pyxel.btn(pyxel.KEY_LEFT): dx = -self.speed
-        if pyxel.btn(pyxel.KEY_RIGHT): dx = self.speed
-        if pyxel.btn(pyxel.KEY_UP): dy = -self.speed
-        if pyxel.btn(pyxel.KEY_DOWN): dy = self.speed
+        if pyxel.btn(pyxel.KEY_LEFT) or pyxel.btn(pyxel.KEY_Q) or pyxel.btn(pyxel.KEY_A):
+            dx -= 1
+        if pyxel.btn(pyxel.KEY_RIGHT) or pyxel.btn(pyxel.KEY_D):
+            dx += 1
+        if pyxel.btn(pyxel.KEY_UP) or pyxel.btn(pyxel.KEY_Z) or pyxel.btn(pyxel.KEY_W):
+            dy -= 1
+        if pyxel.btn(pyxel.KEY_DOWN) or pyxel.btn(pyxel.KEY_S):
+            dy += 1
 
-        new_x = self.x + dx
-        new_y = self.y + dy
+        if dx != 0 or dy != 0:
+            length = (dx**2 + dy**2) ** 0.5
+            dx /= length
+            dy /= length
 
-        if not self.collide_with(new_x, self.y, WALL_TILES):
-            self.x = new_x
-        if not self.collide_with(self.x, new_y, WALL_TILES):
-            self.y = new_y
+            self.velocity_x += dx * self.speed
+            self.velocity_y += dy * self.speed
+
+            self.velocity_x = max(min(self.velocity_x, self.max_velocity), -self.max_velocity)
+            self.velocity_y = max(min(self.velocity_y, self.max_velocity), -self.max_velocity)
+
+        self.update_velocity_x()
+        self.update_velocity_y()
 
     def draw(self):
         pyxel.rect(self.x, self.y, self.width, self.height, 4)
-
+        
 # -------------------- FUNCTIONS -------------------- #
 
 def make_basic_room(width:int, height:int, wall_tile:tuple, floor_tile:tuple)-> Room:
@@ -866,10 +995,10 @@ def generate_dungeon(dungeon_map:DungeonMap, start_room:Room, end_room:Room, fil
 class Game:
 
     def __init__(self):
-        main_menu_scene = Scene(0, "CrumbleKeep - Main Menu", self.update_main_menu, self.draw_main_menu, "assets.pyxres")
-        credits_scene = Scene(1, "CrumbleKeep - Credits", self.update_credits, self.draw_credits, "assets.pyxres")
-        lobby_scene = Scene(2, "CrumbleKeep - Lobby", self.update_lobby, self.draw_lobby, "assets.pyxres")
-        game_scene = Scene(3, "CrumbleKeep - Game", self.update_game, self.draw_game, "assets.pyxres")
+        main_menu_scene = Scene(0, "CrumbleKeep - Main Menu", self.update_main_menu, self.draw_main_menu, "assets.pyxres", PALETTE)
+        credits_scene = Scene(1, "CrumbleKeep - Credits", self.update_credits, self.draw_credits, "assets.pyxres", PALETTE)
+        lobby_scene = Scene(2, "CrumbleKeep - Lobby", self.update_lobby, self.draw_lobby, "assets.pyxres", PALETTE)
+        game_scene = Scene(3, "CrumbleKeep - Game", self.update_game, self.draw_game, "assets.pyxres", PALETTE)
         scenes = [main_menu_scene, credits_scene, lobby_scene, game_scene]
 
         self.pyxel_manager = PyxelManager(228, 128, scenes, 3, fullscreen=True, mouse=True, camera_x=500 * 8, camera_y=500 * 8)
@@ -890,6 +1019,10 @@ class Game:
         self.dungeon_map = DungeonMap(1024, 1024)
         self.min_x, self.min_y, self.max_x, self.max_y = generate_dungeon(self.dungeon_map, self.start_room, self.end_room, self.rooms, [self.special_room], 10, 4, 2)
         self.player = Player(502 * 8, 502 * 8, self.dungeon_map)
+
+        self.light_manager = LightManager()
+        self.player_light = CircleLight(self.player.x + self.player.width // 2, self.player.y + self.player.height // 2, 40, LIGHTSUB_DICT)
+        self.light_manager.add_light(self.player_light)
 
         self.pyxel_manager.run()
 
@@ -939,8 +1072,12 @@ class Game:
             self.pyxel_manager.change_scene(3, 500 * 8, 500 * 8)
             self.dungeon_map = DungeonMap(1024, 1024)
             generate_dungeon(self.dungeon_map, self.start_room, self.end_room, self.rooms, [self.special_room], 10, 4, 2)
+            self.player.x, self.player.y = 502*8, 502*8
+            self.player.dungeon = self.dungeon_map
 
         self.player.update()
+        self.player_light.x, self.player_light.y = self.player.x + self.player.width // 2, self.player.y + self.player.height // 2
+        self.player_light.radius = int(wave_motion(45, 20, 5, pyxel.frame_count))
         self.pyxel_manager.move_camera(self.player.x + self.player.width // 2 - pyxel.width // 2, self.player.y + self.player.height // 2 - pyxel.height // 2)
 
     def draw_game(self):
@@ -948,6 +1085,7 @@ class Game:
 
         self.dungeon_map.draw(self.pyxel_manager.camera_x, self.pyxel_manager.camera_y)
         self.player.draw()
+        self.light_manager.draw(self.pyxel_manager.camera_x, self.pyxel_manager.camera_y)
 
 if __name__ == "__main__":
     Game()
