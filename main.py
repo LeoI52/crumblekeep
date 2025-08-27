@@ -693,12 +693,12 @@ def wave_motion(value:float, wave_speed:float, amplitude:float, time:int)-> floa
 # -------------------- CONSTANTS -------------------- #
 
 PALETTE = [0x100820, 0xFFD19D, 0xAEB5BD, 0x4D80C9, 0x054494, 0x511E43, 0xFFFFFF, 0x823E2C, 0xE93841, 0xF1892D, 0xFFE947, 0xFFA9A9, 0xEB6C82, 0x7D3EBF, 0x1E8A4C, 0x5AE150]
-PALETTE = brightness_adjusted_palette(PALETTE, {"factor":0.6}) + PALETTE
+PALETTE = brightness_adjusted_palette(PALETTE, {"factor":0.35}) + PALETTE
 LIGHTSUB_DICT = {x:x + 16 for x in range(16)}
 
 CARDINAL_OPPOSITE = {"N":"S", "S":"N", "W":"E", "E":"W"}
 
-COLLISION_TILES = {(0, 2), (1, 2), (0, 3), (1, 3)}
+COLLISION_TILES = {(0, 0), (0, 2), (1, 2), (0, 3), (1, 3)}
 
 # -------------------- CLASSES -------------------- #
 
@@ -736,10 +736,13 @@ class DungeonMap:
 
 class Room:
 
-    def __init__(self, width:int, height:int, tiles:list):
+    def __init__(self, width:int, height:int, tiles:list, enemies:list=[], num_enemies:int=0, spawnpoints:list=[]):
         self.width = width
         self.height = height
         self.tiles = tiles
+        self.enemies = enemies
+        self.num_enemies = num_enemies
+        self.spawnpoints = spawnpoints
 
 class Player:
 
@@ -749,6 +752,10 @@ class Player:
         self.width = 24
         self.height = 24
         self.dungeon = dungeon
+        self.aggro_range = 60
+        self.light = CircleLight(x + self.width // 2, y + self.height // 2, self.aggro_range, LIGHTSUB_DICT)
+
+        self.rc_ability = "dash"
 
         self.velocity_x = 0
         self.velocity_y = 0
@@ -795,25 +802,39 @@ class Player:
                     self.velocity_y = 0
                     break
 
+    def right_click(self):
+        if self.rc_ability == "dash" and self.dash_timer == 0:
+            self.dash_timer = self.dash_time
+            dx = pyxel.mouse_x - 114
+            dy = pyxel.mouse_y - 64
+            length = (dx ** 2 + dy ** 2) ** 0.5
+            self.velocity_x = dx / length * self.dash_power
+            self.velocity_y = dy / length * self.dash_power
+
+        elif self.rc_ability == "teleport":
+            dx = pyxel.mouse_x - 114
+            dy = pyxel.mouse_y - 64
+            if not self.collision_rect_tiles(self.x + dx, self.y + dy, self.width, self.height, COLLISION_TILES):
+                self.x += dx
+                self.y += dy
+
+    def update_light(self):
+        self.light.x, self.light.y = self.x + self.width // 2, self.y + self.height // 2
+        #self.light.radius = int(wave_motion(self.aggro_range, 20, 5, pyxel.frame_count))
+
     def update(self):
         if self.dash_timer > 0:
             self.dash_timer -= 1
             self.update_velocity_x()
             self.update_velocity_y()
+            self.update_light()
             return
 
         self.velocity_x *= self.friction
         self.velocity_y *= self.friction
 
-        if pyxel.btnp(pyxel.MOUSE_BUTTON_RIGHT) and self.dash_timer == 0:
-            self.dash_timer = self.dash_time
-            
-            dx = pyxel.mouse_x - 114
-            dy = pyxel.mouse_y - 64
-            length = (dx ** 2 + dy ** 2) ** 0.5
-
-            self.velocity_x = dx / length * self.dash_power
-            self.velocity_y = dy / length * self.dash_power
+        if pyxel.btnp(pyxel.MOUSE_BUTTON_RIGHT):
+            self.right_click()
             return
 
         dx, dy = 0, 0
@@ -839,13 +860,73 @@ class Player:
 
         self.update_velocity_x()
         self.update_velocity_y()
+        self.update_light()
+
+    def draw(self, camera_x:int, camera_y:int):
+        pyxel.rect(self.x, self.y, self.width, self.height, 4)
+
+        self.light.draw(camera_x, camera_y)
+
+class Rat:
+
+    def __init__(self, x:int, y:int, dungeon_map:DungeonMap):
+        self.x = x
+        self.y = y
+        self.width = 16
+        self.height = 16
+        self.speed = 0.8
+        self.dungeon = dungeon_map
+        self.target_offset_x = random.randint(-14, 14)
+        self.target_offset_y = random.randint(-14, 14)
+
+    def collision_rect_tiles(self, x:int, y:int, w:int, h:int, tiles:list)-> bool:
+        start_tile_x = x // 8
+        start_tile_y = y // 8
+        end_tile_x = (x + w - 1) // 8
+        end_tile_y = (y + h - 1) // 8
+
+        for tile_y in range(int(start_tile_y), int(end_tile_y) + 1):
+            for tile_x in range(start_tile_x, end_tile_x + 1):
+                tile_id = self.dungeon.get_tile(tile_x, tile_y)
+
+                if tile_id in tiles:
+                    return True
+        
+        return False
+
+    def update(self, player:Player):
+        dx = (player.x + player.width // 2 + self.target_offset_x) - (self.x + self.width // 2)
+        dy = (player.y + player.height // 2 + self.target_offset_y) - (self.y + self.height // 2)
+        mag = (dx ** 2 + dy ** 2) ** 0.5
+        if mag <= player.aggro_range + self.width // 2:
+            new_x = self.x + dx / mag * self.speed
+            nex_y = self.y + dy / mag * self.speed
+            if not self.collision_rect_tiles(round(new_x), round(nex_y), self.width, self.height, COLLISION_TILES):
+                self.x = new_x
+                self.y = nex_y
 
     def draw(self):
-        pyxel.rect(self.x, self.y, self.width, self.height, 4)
-        
+        pyxel.rect(self.x, self.y, self.width, self.height, 9)
+
+class EnemyManager:
+
+    def __init__(self):
+        self.enemies = []
+
+    def add_enemy(self, enemy):
+        self.enemies.append(enemy)
+
+    def update(self, player:Player):
+        for enemy in self.enemies:
+            enemy.update(player)
+
+    def draw(self):
+        for enemy in self.enemies:
+            enemy.draw()
+
 # -------------------- FUNCTIONS -------------------- #
 
-def make_basic_room(width:int, height:int, wall_tile:tuple, floor_tile:tuple)-> Room:
+def make_basic_room(width:int, height:int, wall_tile:tuple, floor_tile:tuple, enemies:list=[], num_enemies:int=0, spawnpoints:list=[])-> Room:
     tiles = []
     for y in range(height):
         row = []
@@ -855,7 +936,7 @@ def make_basic_room(width:int, height:int, wall_tile:tuple, floor_tile:tuple)-> 
             else:
                 row.append(floor_tile)
         tiles.append(row)
-    return Room(width, height, tiles)
+    return Room(width, height, tiles, enemies, num_enemies, spawnpoints)
 
 def mark_room(room:Room, ox:int, oy:int, occupied_tiles:set)-> set:
     ox += 2
@@ -928,7 +1009,7 @@ def place_next_room(curr_room:Room, curr_pos:tuple, next_room:Room, direction:st
     if direction == "N":
         return (x + x_diff, y - next_room.height * 2 + 2)
 
-def generate_dungeon(dungeon_map:DungeonMap, start_room:Room, end_room:Room, fill_rooms:list, special_rooms:list, num_main_rooms:int, num_branches:int, branch_length:int, ox:int=500, oy:int=500):
+def generate_dungeon(dungeon_map:DungeonMap, enemy_manager:EnemyManager, start_room:Room, end_room:Room, fill_rooms:list, special_rooms:list, num_main_rooms:int, num_branches:int, branch_length:int, ox:int=500, oy:int=500):
     x, y = ox, oy
     curr_room = start_room
     curr_dir = ""
@@ -964,6 +1045,13 @@ def generate_dungeon(dungeon_map:DungeonMap, start_room:Room, end_room:Room, fil
         xs += [x, x + curr_room.width]
         ys += [y, y + curr_room.height]
         draw_room(next_room, x, y, dungeon_map, CARDINAL_OPPOSITE.get(next_dir))
+        if next_room.enemies and next_room.spawnpoints:
+            enemies_spawned_loc = []
+            for _ in range(next_room.num_enemies):
+                enemy_x, enemy_y = random.choice([spawnpoint for spawnpoint in next_room.spawnpoints if spawnpoint not in enemies_spawned_loc])
+                enemies_spawned_loc.append((enemy_x, enemy_y))
+                enemy = random.choice(next_room.enemies)
+                enemy_manager.add_enemy(enemy(x * 8 + enemy_x, y * 8 + enemy_y, dungeon_map))
         curr_room = next_room
         curr_dir = next_dir
         occupied_tiles = mark_room(curr_room, x, y, occupied_tiles)
@@ -996,6 +1084,13 @@ def generate_dungeon(dungeon_map:DungeonMap, start_room:Room, end_room:Room, fil
 
             bx, by = next_bx, next_by
             draw_room(next_room, bx, by, dungeon_map, CARDINAL_OPPOSITE.get(curr_branch_dir))
+            if next_room.enemies and next_room.spawnpoints:
+                enemies_spawned_loc = []
+                for _ in range(next_room.num_enemies):
+                    enemy_x, enemy_y = random.choice([spawnpoint for spawnpoint in next_room.spawnpoints if spawnpoint not in enemies_spawned_loc])
+                    enemies_spawned_loc.append((enemy_x, enemy_y))
+                    enemy = random.choice(next_room.enemies)
+                    enemy_manager.add_enemy(enemy(bx * 8 + enemy_x, by * 8 + enemy_y, dungeon_map))
             occupied_tiles = mark_room(next_room, bx, by, occupied_tiles)
 
             xs += [bx, bx + next_room.width]
@@ -1011,6 +1106,21 @@ def generate_dungeon(dungeon_map:DungeonMap, start_room:Room, end_room:Room, fil
 
     return (min(xs), min(ys), max(xs), max(ys))
 
+# -------------------- ROOMS -------------------- #
+
+start_room = make_basic_room(5, 5, (0, 2), (2, 4))
+end_room = make_basic_room(5, 5, (0, 2), (4, 4))
+special_room = make_basic_room(5, 5, (0, 2), (6, 4))
+rooms = [make_basic_room(7, 7, (0, 2), (0, 4), [Rat], 2, [(20, 20), (76, 20), (20, 76), (76, 76)]), make_basic_room(15, 7, (0, 2), (0, 4)), make_basic_room(17, 13, (0, 2), (0, 4))]
+
+LEVEL_PROGRESSION = {
+    1:[rooms, [special_room], 5, 2, 4],
+    2:[rooms, [special_room], 7, 3, 4],
+    3:[rooms, [special_room], 2, 0, 0],
+    4:[rooms, [special_room], 8, 4, 5],
+    5:[rooms, [special_room], 10, 5, 8]
+}
+
 # -------------------- GAME -------------------- #
 
 class Game:
@@ -1019,31 +1129,30 @@ class Game:
         main_menu_scene = Scene(0, "CrumbleKeep - Main Menu", self.update_main_menu, self.draw_main_menu, "assets.pyxres", PALETTE)
         credits_scene = Scene(1, "CrumbleKeep - Credits", self.update_credits, self.draw_credits, "assets.pyxres", PALETTE)
         lobby_scene = Scene(2, "CrumbleKeep - Lobby", self.update_lobby, self.draw_lobby, "assets.pyxres", PALETTE)
-        game_scene = Scene(3, "CrumbleKeep - Game", self.update_game, self.draw_game, "assets.pyxres", PALETTE)
-        scenes = [main_menu_scene, credits_scene, lobby_scene, game_scene]
+        level_scene = Scene(3, "CrumbleKeep - Level", self.update_level, self.draw_level, "assets.pyxres", PALETTE)
+        scenes = [main_menu_scene, credits_scene, lobby_scene, level_scene]
 
-        self.pyxel_manager = PyxelManager(228, 128, scenes, 3, fullscreen=True, mouse=True, camera_x=500 * 8, camera_y=500 * 8)
+        self.pyxel_manager = PyxelManager(228, 128, scenes, 3, fullscreen=False, mouse=True, camera_x=500 * 8, camera_y=500 * 8)
 
+        #? Main Menu Variables
         self.title = Text("CrumbleKeep", 50, 10, 0, 1, ANCHOR_TOP)
         self.play_button = Button("Play", 50, 50, 6, 0, 0, 6, 1, True, 0, anchor=ANCHOR_TOP, command=self.play_action)
         self.credits_button = Button("Credits", 50, 70, 6, 0, 0, 6, 1, True, 0, anchor=ANCHOR_TOP, command=self.credit_action)
 
+        #? Credits Variables
         self.credits_title = Text("Credits", 55, 7, 6, 1, ANCHOR_TOP)
         self.credits_text = Text("This game was\nmade for the\nBrackeys game\njam 2025 by\nLéo Imbert\nand\nHugochavez\nwith Pyxel.", 55, 70, 6, 1, anchor=ANCHOR_CENTER)
         self.back_button = Button("Back", 55, 121, 0, 6, 6, 0, 1, True, 6, anchor=ANCHOR_BOTTOM, command=self.back_action)
 
-        self.start_room = make_basic_room(5, 5, (0, 2), (2, 4))
-        self.end_room = make_basic_room(5, 5, (0, 2), (4, 4))
-        self.special_room = make_basic_room(5, 5, (0, 2), (6, 4))
-        self.rooms = [make_basic_room(7, 7, (0, 2), (0, 4)), make_basic_room(15, 7, (0, 2), (0, 4)), make_basic_room(17, 13, (0, 2), (0, 4))]
-        
-        self.dungeon_map = DungeonMap(1024, 1024)
-        self.min_x, self.min_y, self.max_x, self.max_y = generate_dungeon(self.dungeon_map, self.start_room, self.end_room, self.rooms, [self.special_room], 10, 4, 2)
-        self.player = Player(502 * 8, 502 * 8, self.dungeon_map)
+        #? Lobby Variables
 
-        self.light_manager = LightManager()
-        self.player_light = CircleLight(self.player.x + self.player.width // 2, self.player.y + self.player.height // 2, 40, LIGHTSUB_DICT)
-        self.light_manager.add_light(self.player_light)
+        #? Level Variables
+        self.level = 1
+
+        self.dungeon_map = None
+        self.player = Player(502 * 8, 502 * 8, self.dungeon_map)
+        self.enemy_manager = EnemyManager()
+        self.enter_level(self.level)
 
         self.pyxel_manager.run()
 
@@ -1055,6 +1164,16 @@ class Game:
 
     def back_action(self):
         self.pyxel_manager.change_scene_dither(0, 0.05, 0)
+
+    def enter_level(self, level:int):
+        r, sr, nr, nb, lb = LEVEL_PROGRESSION.get(level)
+
+        self.enemy_manager = EnemyManager()
+        self.dungeon_map = DungeonMap(1024, 1024)
+        generate_dungeon(self.dungeon_map, self.enemy_manager, start_room, end_room, r, sr, nr, nb, lb)
+        self.player.x, self.player.y, self.player.dungeon = 502 * 8, 502 * 8, self.dungeon_map
+        self.player.update()
+        self.pyxel_manager.set_camera(self.player.x + self.player.width // 2 - pyxel.width // 2, self.player.y + self.player.height // 2 - pyxel.height // 2)
 
     def update_main_menu(self):
         self.title.update()
@@ -1088,25 +1207,29 @@ class Game:
     def draw_lobby(self):
         pyxel.cls(0)
 
-    def update_game(self):
+    def update_level(self):
         if pyxel.btnp(pyxel.KEY_R):
-            self.pyxel_manager.change_scene(3, 500 * 8, 500 * 8)
-            self.dungeon_map = DungeonMap(1024, 1024)
-            generate_dungeon(self.dungeon_map, self.start_room, self.end_room, self.rooms, [self.special_room], 10, 4, 2)
-            self.player.x, self.player.y = 502*8, 502*8
-            self.player.dungeon = self.dungeon_map
+            def action():
+                self.level += 1
+                self.enter_level(self.level)
+
+            self.pyxel_manager.change_scene_outer_circle(3, 3, 18, 500 * 8, 500 * 8, action)
+
+        if pyxel.btnp(pyxel.KEY_A):
+            print(self.enemy_manager.enemies[0].x)
 
         self.player.update()
-        self.player_light.x, self.player_light.y = self.player.x + self.player.width // 2, self.player.y + self.player.height // 2
-        self.player_light.radius = int(wave_motion(45, 20, 5, pyxel.frame_count))
+        self.enemy_manager.update(self.player)
         self.pyxel_manager.move_camera(self.player.x + self.player.width // 2 - pyxel.width // 2, self.player.y + self.player.height // 2 - pyxel.height // 2)
 
-    def draw_game(self):
+    def draw_level(self):
         pyxel.cls(0)
 
         self.dungeon_map.draw(self.pyxel_manager.camera_x, self.pyxel_manager.camera_y)
-        self.player.draw()
-        self.light_manager.draw(self.pyxel_manager.camera_x, self.pyxel_manager.camera_y)
+        self.enemy_manager.draw()
+        self.player.draw(self.pyxel_manager.camera_x, self.pyxel_manager.camera_y)
+
+        pyxel.text(self.pyxel_manager.camera_x + 2, self.pyxel_manager.camera_y + 2, f"-{self.level}", 22)
 
 if __name__ == "__main__":
     Game()
