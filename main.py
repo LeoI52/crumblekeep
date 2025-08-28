@@ -1,7 +1,7 @@
 """
 @author : Léo Imbert
 @created : 25/08/2025
-@updated : 26/08/2025
+@updated : 28/08/2025
 """
 
 import random
@@ -426,6 +426,59 @@ class Scene:
         self.palette = palette
         self.screen_mode = screen_mode
 
+class Sprite:
+
+    def __init__(self, img:int, u:int, v:int, w:int, h:int, colkey:int=None):
+        self.img = img
+        self.u, self.v = u, v
+        self.w, self.h = w, h
+        self.colkey = 0 if colkey == 0 else colkey
+        self.flip_horizontal = False
+        self.flip_vertical = False
+
+class Animation:
+
+    def __init__(self, sprite:Sprite, total_frames:int=1, frame_duration:int=20, loop:bool=True):
+        self.sprite = sprite
+        self.__total_frames = total_frames
+        self.frame_duration = frame_duration
+        self.__loop = loop
+        self.__start_frame = pyxel.frame_count
+        self.current_frame = 0
+        self.__is_finished = False
+
+    def is_finished(self)-> bool:
+        return self.__is_finished and not self.__loop
+    
+    def is_looped(self)-> bool:
+        return self.__loop
+    
+    def reset(self):
+        self.__start_frame = pyxel.frame_count
+        self.current_frame = 0
+        self.__is_finished = False
+
+    def update(self):
+        if self.is_finished():
+            return
+        
+        if pyxel.frame_count - self.__start_frame >= self.frame_duration:
+            self.__start_frame = pyxel.frame_count
+            self.current_frame += 1
+            if self.current_frame >= self.__total_frames:
+                if self.__loop:
+                    self.current_frame = 0
+                else:
+                    self.__is_finished = True
+                    self.current_frame = self.__total_frames - 1
+
+    def draw(self, x:int, y:int, anchor:int=ANCHOR_TOP_LEFT):
+        x, y = get_anchored_position(x, y, self.sprite.w, self.sprite.h, anchor)
+
+        w = -self.sprite.w if self.sprite.flip_horizontal else self.sprite.w
+        h = -self.sprite.h if self.sprite.flip_vertical else self.sprite.h
+        pyxel.blt(x, y, self.sprite.img, self.sprite.u + self.current_frame * abs(self.sprite.w), self.sprite.v, w, h, self.sprite.colkey)
+
 class Text:
 
     def __init__(self, text:str, x:int, y:int, text_colors:int|list, font_size:int=0, anchor:int=ANCHOR_TOP_LEFT, relative:bool=False, color_mode:int=NORMAL_COLOR_MODE, color_speed:int=5, wavy:bool=False, wave_speed:int=10, amplitude:int=3, shadow:bool=False, shadow_color:int=0, shadow_offset:int=1, glitch_intensity:int=0):
@@ -550,74 +603,6 @@ class Button:
         if self.__border:
             pyxel.rectb(x, y, self.__width, self.__height, self.__border_color)
 
-class CircleLight:
-
-    def __init__(self, x:int, y:int, radius:int, lights_substitution_colors:dict, state_change_interval:int=30, turn_on_chance:float=1, turn_off_chance:float=0):
-        self.x= x
-        self.y = y
-        self.__radius = radius
-        self.__lights_substitution_colors = lights_substitution_colors
-        self.__points = self.__generate_points_list()
-        self.on = True
-        self.turn_on_chance = turn_on_chance
-        self.turn_off_chance = turn_off_chance
-        self.__start_frame = pyxel.frame_count
-        self.state_change_interval = state_change_interval
-
-    @property
-    def radius(self)-> int:
-        return self.__radius
-    
-    @radius.setter
-    def radius(self, value):
-        self.__radius = value
-        self.__points = self.__generate_points_list()
-
-    def __generate_points_list(self)-> list:
-        return [(x, y) for x in range(-self.__radius, self.__radius + 1) for y in range(-self.__radius, self.__radius + 1) if x ** 2 + y ** 2 <= self.__radius ** 2]
-
-    def draw(self, camera_x:int, camera_y:int):
-        if pyxel.frame_count - self.__start_frame >= self.state_change_interval:
-            self.__start_frame = pyxel.frame_count
-
-            if self.on and random.random() <= self.turn_off_chance:
-                self.on = False
-            elif not self.on and random.random() <= self.turn_on_chance:
-                self.on = True
-
-        if not self.on:
-            return
-
-        cam_x = camera_x
-        cam_y = camera_y
-
-        for x, y in self.__points:
-            screen_x = self.x + x - cam_x
-            screen_y = self.y + y - cam_y
-
-            if 0 <= screen_x < pyxel.width and 0 <= screen_y < pyxel.height:
-                current_color = pyxel.pget(screen_x, screen_y)
-                if current_color in self.__lights_substitution_colors:
-                    pyxel.pset(self.x + x, self.y + y, self.__lights_substitution_colors[current_color])
-
-class LightManager:
-
-    def __init__(self):
-        self.__lights = []
-
-    def reset(self):
-        self.__lights = []
-
-    def add_light(self, light:CircleLight):
-        self.__lights.append(light)
-
-    def remove_light(self, light:CircleLight):
-        self.__lights.remove(light)
-
-    def draw(self, camera_x:int, camera_y:int):
-        for light in self.__lights:
-            light.draw(camera_x, camera_y)
-
 def get_anchored_position(x:int, y:int, width:int, height:int, anchor:int)-> tuple:
     if anchor in [ANCHOR_TOP_RIGHT, ANCHOR_BOTTOM_RIGHT, ANCHOR_RIGHT]:
         x -= width
@@ -667,38 +652,22 @@ def rounded_rectb(x:int, y:int, width:int, height:int, corner_radius:int, color:
                 if corner_radius - 0.5 <= dist <= corner_radius + 0.5:
                     pyxel.pset(cx + sx * i, cy + sy * j, color)
 
-def hex_to_rgb(hex_val:int)-> tuple:
-    r = (hex_val >> 16) & 0xFF
-    g = (hex_val >> 8) & 0xFF
-    b = hex_val & 0xFF
-    return r, g, b
-
-def rgb_to_hex(r:int, g:int, b:int)-> int:
-    return int(f"0x{r:02X}{g:02X}{b:02X}", 16)
-
-def brightness_adjusted_palette(original_palette:list, kwargs:dict={})-> list:
-    palette = []
-    factor = kwargs.get("factor", 1)
-    for color in original_palette:
-        r, g, b = hex_to_rgb(color)
-        new_r = min(255, max(0, int(r * factor)))
-        new_g = min(255, max(0, int(g * factor)))
-        new_b = min(255, max(0, int(b * factor)))
-        palette.append(rgb_to_hex(new_r, new_g, new_b))
-    return palette
-
 def wave_motion(value:float, wave_speed:float, amplitude:float, time:int)-> float:
     return value + (math.cos(time / wave_speed)) * amplitude
 
 # -------------------- CONSTANTS -------------------- #
 
 PALETTE = [0x100820, 0xFFD19D, 0xAEB5BD, 0x4D80C9, 0x054494, 0x511E43, 0xFFFFFF, 0x823E2C, 0xE93841, 0xF1892D, 0xFFE947, 0xFFA9A9, 0xEB6C82, 0x7D3EBF, 0x1E8A4C, 0x5AE150]
-PALETTE = brightness_adjusted_palette(PALETTE, {"factor":0.35}) + PALETTE
-LIGHTSUB_DICT = {x:x + 16 for x in range(16)}
 
 CARDINAL_OPPOSITE = {"N":"S", "S":"N", "W":"E", "E":"W"}
 
-COLLISION_TILES = {(0, 0), (0, 2), (1, 2), (0, 3), (1, 3)}
+TILES = [(0, 2), (2, 2), (4, 2), (0, 4), (2, 4), (4, 4)]
+COLLISION_TILES = {(0, 0)}
+for u, v in TILES:
+    COLLISION_TILES.add((u, v))
+    COLLISION_TILES.add((u + 1, v))
+    COLLISION_TILES.add((u + 1, v + 1))
+    COLLISION_TILES.add((u, v + 1))
 
 # -------------------- CLASSES -------------------- #
 
@@ -749,13 +718,18 @@ class Player:
     def __init__(self, x:int, y:int, dungeon:DungeonMap):
         self.x = x
         self.y = y
-        self.width = 24
-        self.height = 24
+        self.width = 19
+        self.height = 18
         self.dungeon = dungeon
         self.aggro_range = 60
-        self.light = CircleLight(x + self.width // 2, y + self.height // 2, self.aggro_range, LIGHTSUB_DICT)
+
+        self.b_idle_animation = Animation(Sprite(1, 0, 8, 19, 18, 11), 2, 20)
+        self.b_walk_animation = Animation(Sprite(1, 0, 26, 19, 18, 11), 2, 10)
+
+        self.current_animation = self.b_walk_animation
 
         self.rc_ability = "dash"
+        self.facing_right = True
 
         self.velocity_x = 0
         self.velocity_y = 0
@@ -786,7 +760,7 @@ class Player:
         if self.velocity_x != 0:
             step_x = 1 if self.velocity_x > 0 else -1
             for _ in range(int(abs(self.velocity_x))):
-                if not self.collision_rect_tiles(self.x + step_x, self.y, self.width, self.height, COLLISION_TILES):
+                if not self.collision_rect_tiles(self.x + step_x, self.y + 7, self.width, self.height - 7, COLLISION_TILES):
                     self.x += step_x
                 else:
                     self.velocity_x = 0
@@ -796,13 +770,18 @@ class Player:
         if self.velocity_y != 0:
             step_y = 1 if self.velocity_y > 0 else -1
             for _ in range(int(abs(self.velocity_y))):
-                if not self.collision_rect_tiles(self.x, self.y + step_y, self.width, self.height, COLLISION_TILES):
+                if not self.collision_rect_tiles(self.x, self.y + step_y + 7, self.width, self.height - 7, COLLISION_TILES):
                     self.y += step_y
                 else:
                     self.velocity_y = 0
                     break
 
     def right_click(self):
+        if pyxel.mouse_x < 114:
+            self.facing_right = False
+        else:
+            self.facing_right = True
+
         if self.rc_ability == "dash" and self.dash_timer == 0:
             self.dash_timer = self.dash_time
             dx = pyxel.mouse_x - 114
@@ -818,16 +797,13 @@ class Player:
                 self.x += dx
                 self.y += dy
 
-    def update_light(self):
-        self.light.x, self.light.y = self.x + self.width // 2, self.y + self.height // 2
-        #self.light.radius = int(wave_motion(self.aggro_range, 20, 5, pyxel.frame_count))
-
     def update(self):
+        self.current_animation.update()
+
         if self.dash_timer > 0:
             self.dash_timer -= 1
             self.update_velocity_x()
             self.update_velocity_y()
-            self.update_light()
             return
 
         self.velocity_x *= self.friction
@@ -840,8 +816,10 @@ class Player:
         dx, dy = 0, 0
         if pyxel.btn(pyxel.KEY_LEFT) or pyxel.btn(pyxel.KEY_Q) or pyxel.btn(pyxel.KEY_A):
             dx -= 1
+            self.facing_right = False
         if pyxel.btn(pyxel.KEY_RIGHT) or pyxel.btn(pyxel.KEY_D):
             dx += 1
+            self.facing_right = True
         if pyxel.btn(pyxel.KEY_UP) or pyxel.btn(pyxel.KEY_Z) or pyxel.btn(pyxel.KEY_W):
             dy -= 1
         if pyxel.btn(pyxel.KEY_DOWN) or pyxel.btn(pyxel.KEY_S):
@@ -858,14 +836,17 @@ class Player:
             self.velocity_x = max(min(self.velocity_x, self.max_velocity), -self.max_velocity)
             self.velocity_y = max(min(self.velocity_y, self.max_velocity), -self.max_velocity)
 
+            self.current_animation = self.b_walk_animation
+        else:
+            self.current_animation = self.b_idle_animation
+    
+
         self.update_velocity_x()
         self.update_velocity_y()
-        self.update_light()
 
-    def draw(self, camera_x:int, camera_y:int):
-        pyxel.rect(self.x, self.y, self.width, self.height, 4)
-
-        self.light.draw(camera_x, camera_y)
+    def draw(self):
+        self.current_animation.sprite.flip_horizontal = not self.facing_right
+        self.current_animation.draw(self.x, self.y)
 
 class Rat:
 
@@ -894,16 +875,59 @@ class Rat:
         
         return False
 
+    def has_line_of_sight(self, player:Player) -> bool:    
+        x0 = int((self.x + self.width // 2) // 8)
+        y0 = int((self.y + self.height // 2) // 8)
+        x1 = int((player.x + player.width // 2) // 8)
+        y1 = int((player.y + player.height // 2) // 8)
+
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+
+        while True:
+            if self.dungeon.get_tile(x0, y0) in COLLISION_TILES:
+                return False
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x0 += sx
+            if e2 < dx:
+                err += dx
+                y0 += sy
+
+        return True
+
+    def avoid_walls(self, dx:int, dy:int):
+        new_x = self.x + dx * self.speed
+        new_y = self.y + dy * self.speed
+
+        if not self.collision_rect_tiles(round(new_x), round(new_y), self.width, self.height, COLLISION_TILES):
+            return dx, dy
+        if not self.collision_rect_tiles(round(new_x), round(self.y), self.width, self.height, COLLISION_TILES):
+            return dx, 0
+        if not self.collision_rect_tiles(round(self.x), round(new_y), self.width, self.height, COLLISION_TILES):
+            return 0, dy
+        return 0, 0
+
     def update(self, player:Player):
         dx = (player.x + player.width // 2 + self.target_offset_x) - (self.x + self.width // 2)
         dy = (player.y + player.height // 2 + self.target_offset_y) - (self.y + self.height // 2)
-        mag = (dx ** 2 + dy ** 2) ** 0.5
+        mag = math.hypot(dx, dy)
+
         if mag <= player.aggro_range + self.width // 2:
-            new_x = self.x + dx / mag * self.speed
-            nex_y = self.y + dy / mag * self.speed
-            if not self.collision_rect_tiles(round(new_x), round(nex_y), self.width, self.height, COLLISION_TILES):
-                self.x = new_x
-                self.y = nex_y
+            if self.has_line_of_sight(player):
+                dx /= mag
+                dy /= mag
+
+                dx, dy = self.avoid_walls(dx, dy)
+
+                self.x += dx * self.speed
+                self.y += dy * self.speed
 
     def draw(self):
         pyxel.rect(self.x, self.y, self.width, self.height, 9)
@@ -955,7 +979,7 @@ def check_room_collision(room:Room, ox:int, oy:int, occupied_tiles:set):
                 return True
     return False
 
-def draw_room(room:Room, ox:int, oy:int, dungeon_map:DungeonMap, direction:str="", door_tile:tuple=(0, 4)):
+def draw_room(room:Room, ox:int, oy:int, dungeon_map:DungeonMap, direction:str=""):
     for y in range(0, room.height * 2, 2):
         for x in range(0, room.width * 2, 2):
             u, v = room.tiles[y // 2][x // 2]
@@ -964,11 +988,10 @@ def draw_room(room:Room, ox:int, oy:int, dungeon_map:DungeonMap, direction:str="
             dungeon_map.set_tile(ox + x + 1, oy + y + 1, (u + 1, v + 1))
             dungeon_map.set_tile(ox + x, oy + y + 1, (u, v + 1))
 
-    u, v = door_tile
-
     if direction == "N":
         cx = ox + room.width
         for dx in (-3, -1, 1):
+            u, v = get_random_floor()
             dungeon_map.set_tile(cx + dx, oy, (u, v))
             dungeon_map.set_tile(cx + dx + 1, oy, (u + 1, v))
             dungeon_map.set_tile(cx + dx + 1, oy + 1, (u + 1, v + 1))
@@ -976,6 +999,7 @@ def draw_room(room:Room, ox:int, oy:int, dungeon_map:DungeonMap, direction:str="
     elif direction == "S":
         cx = ox + room.width
         for dx in (-3, -1, 1):
+            u, v = get_random_floor()
             dungeon_map.set_tile(cx + dx, oy + room.height * 2 - 2, (u, v))
             dungeon_map.set_tile(cx + dx + 1, oy + room.height * 2 - 2, (u + 1, v))
             dungeon_map.set_tile(cx + dx + 1, oy + room.height * 2 - 1, (u + 1, v + 1))
@@ -983,6 +1007,7 @@ def draw_room(room:Room, ox:int, oy:int, dungeon_map:DungeonMap, direction:str="
     elif direction == "W":
         cy = oy + room.height
         for dy in (-3, -1, 1):
+            u, v = get_random_floor()
             dungeon_map.set_tile(ox, cy + dy, (u, v))
             dungeon_map.set_tile(ox + 1, cy + dy, (u + 1, v))
             dungeon_map.set_tile(ox + 1, cy + dy + 1, (u + 1, v + 1))
@@ -990,6 +1015,7 @@ def draw_room(room:Room, ox:int, oy:int, dungeon_map:DungeonMap, direction:str="
     elif direction == "E":
         cy = oy + room.height
         for dy in (-3, -1, 1):
+            u, v = get_random_floor()
             dungeon_map.set_tile(ox + room.width * 2 - 2, cy + dy, (u, v))
             dungeon_map.set_tile(ox + room.width * 2 - 1, cy + dy, (u + 1, v))
             dungeon_map.set_tile(ox + room.width * 2 - 1, cy + dy + 1, (u + 1, v + 1))
@@ -1047,7 +1073,7 @@ def generate_dungeon(dungeon_map:DungeonMap, enemy_manager:EnemyManager, start_r
         draw_room(next_room, x, y, dungeon_map, CARDINAL_OPPOSITE.get(next_dir))
         if next_room.enemies and next_room.spawnpoints:
             enemies_spawned_loc = []
-            for _ in range(next_room.num_enemies):
+            for _ in range(random.randint(1, next_room.num_enemies)):
                 enemy_x, enemy_y = random.choice([spawnpoint for spawnpoint in next_room.spawnpoints if spawnpoint not in enemies_spawned_loc])
                 enemies_spawned_loc.append((enemy_x, enemy_y))
                 enemy = random.choice(next_room.enemies)
@@ -1086,7 +1112,7 @@ def generate_dungeon(dungeon_map:DungeonMap, enemy_manager:EnemyManager, start_r
             draw_room(next_room, bx, by, dungeon_map, CARDINAL_OPPOSITE.get(curr_branch_dir))
             if next_room.enemies and next_room.spawnpoints:
                 enemies_spawned_loc = []
-                for _ in range(next_room.num_enemies):
+                for _ in range(random.randint(1, next_room.num_enemies)):
                     enemy_x, enemy_y = random.choice([spawnpoint for spawnpoint in next_room.spawnpoints if spawnpoint not in enemies_spawned_loc])
                     enemies_spawned_loc.append((enemy_x, enemy_y))
                     enemy = random.choice(next_room.enemies)
@@ -1106,19 +1132,53 @@ def generate_dungeon(dungeon_map:DungeonMap, enemy_manager:EnemyManager, start_r
 
     return (min(xs), min(ys), max(xs), max(ys))
 
+def get_random_floor()-> tuple:
+    return random.choice([(0, 6), (2, 6), (4, 6), (6, 6)])
+
+def get_random_wall_h()-> tuple:
+    return random.choice([(0, 2), (2, 2), (4, 2)])
+
+def get_random_wall_v()-> tuple:
+    return random.choice([(0, 4), (2, 4), (4, 4)])
+
 # -------------------- ROOMS -------------------- #
 
-start_room = make_basic_room(5, 5, (0, 2), (2, 4))
-end_room = make_basic_room(5, 5, (0, 2), (4, 4))
-special_room = make_basic_room(5, 5, (0, 2), (6, 4))
-rooms = [make_basic_room(7, 7, (0, 2), (0, 4), [Rat], 2, [(20, 20), (76, 20), (20, 76), (76, 76)]), make_basic_room(15, 7, (0, 2), (0, 4)), make_basic_room(17, 13, (0, 2), (0, 4))]
+START_ROOM = Room(5, 5, [[get_random_wall_h(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_h()],
+                         [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                         [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                         [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                         [get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v()]])
+
+END_ROOM = Room(5, 5, [[get_random_wall_h(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_h()],
+                       [get_random_wall_h(), (0, 8), (0, 8), (0, 8), get_random_wall_h()],
+                       [get_random_wall_h(), (0, 8), (0, 8), (0, 8), get_random_wall_h()],
+                       [get_random_wall_h(), (0, 8), (0, 8), (0, 8), get_random_wall_h()],
+                       [get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v()]])
+
+ROOM_1 = Room(9, 9, [[get_random_wall_h(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_h()],
+                     [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                     [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                     [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                     [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                     [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_wall_v(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                     [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                     [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                     [get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v()]], [Rat], 1, [(20, 20)])
+
+FILL_ROOMS = [ROOM_1]
+
+SPECIAL_ROOM = Room(5, 5, [[get_random_wall_h(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_h()],
+                           [get_random_wall_h(), (2, 8), (2, 8), (2, 8), get_random_wall_h()],
+                           [get_random_wall_h(), (2, 8), (2, 8), (2, 8), get_random_wall_h()],
+                           [get_random_wall_h(), (2, 8), (2, 8), (2, 8), get_random_wall_h()],
+                           [get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v()]])
 
 LEVEL_PROGRESSION = {
-    1:[rooms, [special_room], 5, 2, 4],
-    2:[rooms, [special_room], 7, 3, 4],
-    3:[rooms, [special_room], 2, 0, 0],
-    4:[rooms, [special_room], 8, 4, 5],
-    5:[rooms, [special_room], 10, 5, 8]
+    1:[FILL_ROOMS, [SPECIAL_ROOM], 5, 2, 4],
+    2:[FILL_ROOMS, [SPECIAL_ROOM], 7, 3, 4],
+    3:[FILL_ROOMS, [SPECIAL_ROOM], 2, 0, 0],
+    4:[FILL_ROOMS, [SPECIAL_ROOM], 8, 4, 5],
+    5:[FILL_ROOMS, [SPECIAL_ROOM], 10, 5, 8]
 }
 
 # -------------------- GAME -------------------- #
@@ -1132,7 +1192,7 @@ class Game:
         level_scene = Scene(3, "CrumbleKeep - Level", self.update_level, self.draw_level, "assets.pyxres", PALETTE)
         scenes = [main_menu_scene, credits_scene, lobby_scene, level_scene]
 
-        self.pyxel_manager = PyxelManager(228, 128, scenes, 3, fullscreen=False, mouse=True, camera_x=500 * 8, camera_y=500 * 8)
+        self.pyxel_manager = PyxelManager(228, 128, scenes, 3, fullscreen=True, mouse=True, camera_x=500 * 8, camera_y=500 * 8)
 
         #? Main Menu Variables
         self.title = Text("CrumbleKeep", 50, 10, 0, 1, ANCHOR_TOP)
@@ -1170,9 +1230,8 @@ class Game:
 
         self.enemy_manager = EnemyManager()
         self.dungeon_map = DungeonMap(1024, 1024)
-        generate_dungeon(self.dungeon_map, self.enemy_manager, start_room, end_room, r, sr, nr, nb, lb)
+        generate_dungeon(self.dungeon_map, self.enemy_manager, START_ROOM, END_ROOM, r, sr, nr, nb, lb)
         self.player.x, self.player.y, self.player.dungeon = 502 * 8, 502 * 8, self.dungeon_map
-        self.player.update()
         self.pyxel_manager.set_camera(self.player.x + self.player.width // 2 - pyxel.width // 2, self.player.y + self.player.height // 2 - pyxel.height // 2)
 
     def update_main_menu(self):
@@ -1215,9 +1274,6 @@ class Game:
 
             self.pyxel_manager.change_scene_outer_circle(3, 3, 18, 500 * 8, 500 * 8, action)
 
-        if pyxel.btnp(pyxel.KEY_A):
-            print(self.enemy_manager.enemies[0].x)
-
         self.player.update()
         self.enemy_manager.update(self.player)
         self.pyxel_manager.move_camera(self.player.x + self.player.width // 2 - pyxel.width // 2, self.player.y + self.player.height // 2 - pyxel.height // 2)
@@ -1227,7 +1283,7 @@ class Game:
 
         self.dungeon_map.draw(self.pyxel_manager.camera_x, self.pyxel_manager.camera_y)
         self.enemy_manager.draw()
-        self.player.draw(self.pyxel_manager.camera_x, self.pyxel_manager.camera_y)
+        self.player.draw()
 
         pyxel.text(self.pyxel_manager.camera_x + 2, self.pyxel_manager.camera_y + 2, f"-{self.level}", 22)
 
