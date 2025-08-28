@@ -728,20 +728,20 @@ class Player:
 
         self.current_animation = self.b_walk_animation
 
-        self.rc_ability = "dash"
+        self.rc_ability = ""
         self.facing_right = True
 
         self.velocity_x = 0
         self.velocity_y = 0
         self.speed = 0.8
-        self.max_velocity = 2
+        self.max_velocity = 1.9
         self.friction = 0.85
 
         self.dash_timer = 0
         self.dash_time = 10
         self.dash_power = 10
 
-    def collision_rect_tiles(self, x:int, y:int, w:int, h:int, tiles:list)-> bool:
+    def collision_rect_tiles_dungeon(self, x:int, y:int, w:int, h:int, tiles:list)-> bool:
         start_tile_x = x // 8
         start_tile_y = y // 8
         end_tile_x = (x + w - 1) // 8
@@ -755,22 +755,37 @@ class Player:
                     return True
         
         return False
+    
+    def collision_rect_tiles_tilemap(self, x:int, y:int, w:int, h:int, tiles:list)-> bool:
+        start_tile_x = x // 8
+        start_tile_y = y // 8
+        end_tile_x = (x + w - 1) // 8
+        end_tile_y = (y + h - 1) // 8
 
-    def update_velocity_x(self):
+        for tile_y in range(int(start_tile_y), int(end_tile_y) + 1):
+            for tile_x in range(start_tile_x, end_tile_x + 1):
+                tile_id = pyxel.tilemaps[2].pget(tile_x, tile_y)
+
+                if tile_id in tiles:
+                    return True
+        
+        return False
+
+    def update_velocity_x(self, scene:str):
         if self.velocity_x != 0:
             step_x = 1 if self.velocity_x > 0 else -1
             for _ in range(int(abs(self.velocity_x))):
-                if not self.collision_rect_tiles(self.x + step_x, self.y + 7, self.width, self.height - 7, COLLISION_TILES):
+                if (not self.collision_rect_tiles_dungeon(self.x + step_x, self.y + 7, self.width, self.height - 7, COLLISION_TILES) and scene == "level") or (not self.collision_rect_tiles_tilemap(self.x + step_x, self.y + 7, self.width, self.height - 7, COLLISION_TILES) and scene == "lobby"):
                     self.x += step_x
                 else:
                     self.velocity_x = 0
                     break
 
-    def update_velocity_y(self):
+    def update_velocity_y(self, scene:str):
         if self.velocity_y != 0:
             step_y = 1 if self.velocity_y > 0 else -1
             for _ in range(int(abs(self.velocity_y))):
-                if not self.collision_rect_tiles(self.x, self.y + step_y + 7, self.width, self.height - 7, COLLISION_TILES):
+                if (not self.collision_rect_tiles_dungeon(self.x, self.y + step_y + 7, self.width, self.height - 7, COLLISION_TILES) and scene == "level") or (not self.collision_rect_tiles_tilemap(self.x, self.y + step_y + 7, self.width, self.height - 7, COLLISION_TILES) and scene == "lobby"):
                     self.y += step_y
                 else:
                     self.velocity_y = 0
@@ -793,17 +808,17 @@ class Player:
         elif self.rc_ability == "teleport":
             dx = pyxel.mouse_x - 114
             dy = pyxel.mouse_y - 64
-            if not self.collision_rect_tiles(self.x + dx, self.y + dy, self.width, self.height, COLLISION_TILES):
+            if not self.collision_rect_tiles_dungeon(self.x + dx, self.y + dy, self.width, self.height, COLLISION_TILES):
                 self.x += dx
                 self.y += dy
 
-    def update(self):
+    def update(self, scene:str):
         self.current_animation.update()
 
         if self.dash_timer > 0:
             self.dash_timer -= 1
-            self.update_velocity_x()
-            self.update_velocity_y()
+            self.update_velocity_x(scene)
+            self.update_velocity_y(scene)
             return
 
         self.velocity_x *= self.friction
@@ -841,12 +856,14 @@ class Player:
             self.current_animation = self.b_idle_animation
     
 
-        self.update_velocity_x()
-        self.update_velocity_y()
+        self.update_velocity_x(scene)
+        self.update_velocity_y(scene)
 
-    def draw(self):
+    def draw(self, scene:str):
         self.current_animation.sprite.flip_horizontal = not self.facing_right
         self.current_animation.draw(self.x, self.y)
+        if scene == "level":
+            pyxel.circb(self.x + self.width // 2, self.y + self.height // 2, self.aggro_range, 8)
 
 class Rat:
 
@@ -859,6 +876,8 @@ class Rat:
         self.dungeon = dungeon_map
         self.target_offset_x = random.randint(-14, 14)
         self.target_offset_y = random.randint(-14, 14)
+
+        self.attack = False
 
     def collision_rect_tiles(self, x:int, y:int, w:int, h:int, tiles:list)-> bool:
         start_tile_x = x // 8
@@ -917,9 +936,11 @@ class Rat:
     def update(self, player:Player):
         dx = (player.x + player.width // 2 + self.target_offset_x) - (self.x + self.width // 2)
         dy = (player.y + player.height // 2 + self.target_offset_y) - (self.y + self.height // 2)
-        mag = math.hypot(dx, dy)
+        mag = (dx ** 2 + dy ** 2) ** 0.5
 
-        if mag <= player.aggro_range + self.width // 2:
+        if mag <= 10:
+            self.attack = True
+        elif mag <= player.aggro_range + self.width // 2:
             if self.has_line_of_sight(player):
                 dx /= mag
                 dy /= mag
@@ -930,7 +951,8 @@ class Rat:
                 self.y += dy * self.speed
 
     def draw(self):
-        pyxel.rect(self.x, self.y, self.width, self.height, 9)
+        if not self.attack:
+            pyxel.rect(self.x, self.y, self.width, self.height, 9)
 
 class EnemyManager:
 
@@ -1163,9 +1185,33 @@ ROOM_1 = Room(9, 9, [[get_random_wall_h(), get_random_wall_v(), get_random_wall_
                      [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_wall_v(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
                      [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
                      [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
-                     [get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v()]], [Rat], 1, [(20, 20)])
+                     [get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v()]], [Rat], 1, [(20, 20), (5*16, 4*16)])
 
-FILL_ROOMS = [ROOM_1]
+ROOM_2 = Room(21, 7, [[get_random_wall_h(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_h(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_h()],
+                      [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                      [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                      [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h(), get_random_wall_v(), get_random_wall_v(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                      [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                      [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                      [get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v()]])
+
+ROOM_3 = Room(15, 15, [[get_random_wall_h(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_h(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_h()],
+                       [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                       [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                       [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                       [get_random_wall_h(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_v(), get_random_wall_v(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                       [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                       [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_v(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                       [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h(), get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                       [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_v(), get_random_wall_v(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                       [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                       [get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                       [get_random_wall_h(), get_random_wall_h(), get_random_wall_h(), get_random_wall_v(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                       [get_random_wall_h(), get_random_wall_h(), get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                       [get_random_wall_h(), get_random_wall_h(), get_random_wall_h(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_floor(), get_random_wall_h()],
+                       [get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v()]])
+
+FILL_ROOMS = [ROOM_1, ROOM_2, ROOM_3]
 
 SPECIAL_ROOM = Room(5, 5, [[get_random_wall_h(), get_random_wall_v(), get_random_wall_v(), get_random_wall_v(), get_random_wall_h()],
                            [get_random_wall_h(), (2, 8), (2, 8), (2, 8), get_random_wall_h()],
@@ -1192,7 +1238,7 @@ class Game:
         level_scene = Scene(3, "CrumbleKeep - Level", self.update_level, self.draw_level, "assets.pyxres", PALETTE)
         scenes = [main_menu_scene, credits_scene, lobby_scene, level_scene]
 
-        self.pyxel_manager = PyxelManager(228, 128, scenes, 3, fullscreen=True, mouse=True, camera_x=500 * 8, camera_y=500 * 8)
+        self.pyxel_manager = PyxelManager(228, 128, scenes, fullscreen=True, mouse=True, camera_x=0, camera_y=0)
 
         #? Main Menu Variables
         self.title = Text("CrumbleKeep", 50, 10, 0, 1, ANCHOR_TOP)
@@ -1205,19 +1251,21 @@ class Game:
         self.back_button = Button("Back", 55, 121, 0, 6, 6, 0, 1, True, 6, anchor=ANCHOR_BOTTOM, command=self.back_action)
 
         #? Lobby Variables
+        self.dungeon_map = DungeonMap(1024, 1024)
+        self.player = Player(10*8, 4*8, self.dungeon_map)
 
         #? Level Variables
         self.level = 1
 
-        self.dungeon_map = None
-        self.player = Player(502 * 8, 502 * 8, self.dungeon_map)
+        # self.dungeon_map = None
+        # self.player = Player(502 * 8, 502 * 8, self.dungeon_map)
         self.enemy_manager = EnemyManager()
-        self.enter_level(self.level)
+        # self.enter_level(self.level)
 
         self.pyxel_manager.run()
 
     def play_action(self):
-        self.pyxel_manager.change_scene_dither(2, 0.05, 0)
+        self.pyxel_manager.change_scene_dither(2, 0.05, 0, 80 + self.player.width // 2 - pyxel.width // 2, 32 + self.player.height // 2 - pyxel.height // 2)
 
     def credit_action(self):
         self.pyxel_manager.change_scene_dither(1, 0.05, 0)
@@ -1261,10 +1309,14 @@ class Game:
         self.back_button.draw()
 
     def update_lobby(self):
-        pass
+        self.player.update("lobby")
+        self.pyxel_manager.move_camera(self.player.x + self.player.width // 2 - pyxel.width // 2, self.player.y + self.player.height // 2 - pyxel.height // 2)
 
     def draw_lobby(self):
         pyxel.cls(0)
+
+        pyxel.bltm(0, 0, 2, 0, 0, 24*8, 20*8, 0)
+        self.player.draw("lobby")
 
     def update_level(self):
         if pyxel.btnp(pyxel.KEY_R):
@@ -1274,7 +1326,7 @@ class Game:
 
             self.pyxel_manager.change_scene_outer_circle(3, 3, 18, 500 * 8, 500 * 8, action)
 
-        self.player.update()
+        self.player.update("level")
         self.enemy_manager.update(self.player)
         self.pyxel_manager.move_camera(self.player.x + self.player.width // 2 - pyxel.width // 2, self.player.y + self.player.height // 2 - pyxel.height // 2)
 
@@ -1283,7 +1335,7 @@ class Game:
 
         self.dungeon_map.draw(self.pyxel_manager.camera_x, self.pyxel_manager.camera_y)
         self.enemy_manager.draw()
-        self.player.draw()
+        self.player.draw("level")
 
         pyxel.text(self.pyxel_manager.camera_x + 2, self.pyxel_manager.camera_y + 2, f"-{self.level}", 22)
 
